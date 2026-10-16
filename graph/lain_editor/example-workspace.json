@@ -1,0 +1,75 @@
+{
+  "format": "lain-tiled-editor",
+  "version": 1,
+  "panes": [
+    {
+      "id": "43c411ff-32f0-4be9-91e9-9be5c2f4acfc",
+      "title": "Semantic chain",
+      "filename": "",
+      "source": "(define shift (network [x] (+ x 1)))\n(define square (network [x] (* x x)))\n(define source 4)\n(define result (square (shift source)))",
+      "executedSource": "(define shift (network [x] (+ x 1)))\n(define square (network [x] (* x x)))\n(define source 4)\n(define result (square (shift source)))",
+      "extensions": [],
+      "extensionDraft": "",
+      "outputRatio": 0.7,
+      "display": {
+        "cell": "result",
+        "mode": "graph",
+        "direction": "upstream"
+      }
+    },
+    {
+      "id": "af281e1f-d8d7-4441-8dfd-1fa798740080",
+      "title": "Late extension",
+      "filename": "",
+      "source": "(define result 42)",
+      "executedSource": "(define result 42)",
+      "extensions": [
+        "(define next (+ result 1))"
+      ],
+      "extensionDraft": "",
+      "outputRatio": 0.45,
+      "display": {
+        "cell": "next",
+        "mode": "value",
+        "direction": "upstream"
+      }
+    },
+    {
+      "id": "503aebe4-8991-4424-8572-c159601aee6a",
+      "title": "Cell inspection",
+      "filename": "lain-editor-file-demo.lain",
+      "source": "(define result (* 8 8))\n",
+      "executedSource": "(define result (* 8 8))\n",
+      "extensions": [],
+      "extensionDraft": "",
+      "outputRatio": 0.45,
+      "display": {
+        "cell": "result",
+        "mode": "cell",
+        "direction": "upstream"
+      }
+    }
+  ],
+  "layout": {
+    "type": "split",
+    "axis": "row",
+    "ratio": 0.5,
+    "first": {
+      "type": "pane",
+      "id": "43c411ff-32f0-4be9-91e9-9be5c2f4acfc"
+    },
+    "second": {
+      "type": "split",
+      "axis": "column",
+      "ratio": 0.5,
+      "first": {
+        "type": "pane",
+        "id": "af281e1f-d8d7-4441-8dfd-1fa798740080"
+      },
+      "second": {
+        "type": "pane",
+        "id": "503aebe4-8991-4424-8572-c159601aee6a"
+      }
+    }
+  }
+}

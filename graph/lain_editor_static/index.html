@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lain / tiled environment</title><link rel="stylesheet" href="/style.css"></head>
+<body><div class="workspace-chrome"><header class="workspace-bar"><div class="brand"><b>lain<span> / </span></b>tiled environment</div>
+<div class="workspace-actions"><span id="count">01 block</span><button id="commands">Commands</button>
+<details class="options workspace-options"><summary aria-label="Workspace options">…</summary>
+<div class="popover"><button id="save">Save JSON</button>
+<label class="button" tabindex="0" id="open-label">Open JSON<input id="open" type="file" accept=".json,application/json" hidden></label></div>
+</details></div></header></div>
+<main id="workspace" aria-label="Tiled Lain editors"></main>
+<footer><span class="signal"></span><span id="message" role="status">Local runtime · independent blocks</span>
+<span class="hint">Click a block · ⌘K / Ctrl+K commands · ⌘Enter / Ctrl+Enter run</span></footer>
+<script src="/compiled/app.js"></script></body></html>
