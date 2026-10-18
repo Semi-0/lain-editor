@@ -4,7 +4,7 @@
             [graph.lain-editor.frontend.dom :as dom]
             [graph.lain-editor.frontend.value-grid :as value-grid]
             [graph.lain-editor.frontend.effects :as effects]
-            [graph.lain-editor.frontend.graph :as graph]
+            [graph.lain-editor.frontend.value-view :as value-view]
             [graph.lain-editor.frontend.replay :as replay]
             [graph.lain-editor.frontend.graph-updates :as updates]
             [graph.lain-editor.frontend.reactive :as rx]
@@ -18,6 +18,9 @@
                                        {:visible (layers/visible? pane "topology")
                                         :entry entry :request current}) descriptor entry request)
         previous (atom nil)
+        view-state (atom {})
+        folded-values (atom #{})
+        scope-trail (atom [])
         mounted (atom nil)
         clear! (fn [] (when @mounted ((get-in @mounted [:handle :dispose!]))) (reset! mounted nil))]
     (rx/watch! scope entry
@@ -53,10 +56,21 @@
                            ((get-in @mounted [:handle :update!]) next-graph changed)
                            (swap! mounted assoc :graph next-graph))
                          (let [_ (clear!)
-                               handle (graph/mount! body next-graph
+                               canvas (dom/element "div" "semantic-scope-body")
+                               _ (dom/replace! body)
+                               _ (when (:parent request)
+                                   (dom/append! body
+                                                (dom/button "Back to enclosing scope"
+                                                            #(let [parent (peek @scope-trail)]
+                                                               (when (seq @scope-trail) (swap! scope-trail pop))
+                                                               (swap! s/expansions assoc id parent)))))
+                               _ (dom/append! body canvas)
+                               handle (value-view/mount! canvas next-graph
                                                    (fn [node signal chase?]
                                                      (effects/api! (assoc (dissoc request :refresh) :op "inspect" :parent nil :node node :chase chase?) signal))
-                                                   #(swap! s/expansions assoc id %) request changed)]
+                                                   #(do (swap! scope-trail conj (:parent request))
+                                                        (swap! s/expansions assoc id %))
+                                                   (assoc request :view-state view-state) changed folded-values)]
                            (reset! mounted {:key key :graph next-graph :handle handle}))))
                      :else (do (clear!) (dom/replace! body))))))
     (rx/own! scope clear!)))

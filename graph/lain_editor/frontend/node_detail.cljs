@@ -5,15 +5,16 @@
             [graph.lain-editor.frontend.reactive :as rx]))
 
 (defn mount! [scope detail inspect expand]
-  (let [active (atom nil)
+  (let [active (atom nil) selected (atom nil)
         cancel! (fn []
                   (when-let [controller @active] (.abort controller))
                   (reset! active nil))
-        clear! (fn [] (cancel!) (dom/replace! detail))]
+        clear! (fn [] (reset! selected nil) (cancel!) (dom/replace! detail))]
     (.setAttribute detail "role" "region")
     (.setAttribute detail "aria-label" "Node view")
     (rx/own! scope cancel!)
     (letfn [(read! [node chase?]
+              (reset! selected [node chase?])
               (cancel!)
               (let [controller (js/AbortController.)
                     body (dom/element "div" "node-detail-body")
@@ -34,4 +35,5 @@
                     (.catch (fn [error]
                               (when (and (current?) (not= "AbortError" (.-name error)))
                                 (dom/text! body (.-message error))))))))]
-      {:select! #(read! % false) :clear! clear!})))
+      {:select! #(read! % false) :clear! clear!
+       :refresh! #(when-let [[node chase?] @selected] (read! node chase?))})))

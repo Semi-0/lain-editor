@@ -4,6 +4,7 @@
             [graph.lain-editor.layers :as layers]
             [graph.lain-editor.frontend.dom :as dom]
             [graph.lain-editor.frontend.effects :as effects]
+            [graph.lain-editor.frontend.fullscreen :as fullscreen]
             [graph.lain-editor.frontend.extension-editors :as extension-editors]
             [graph.lain-editor.frontend.composition :as composition]
             [graph.lain-editor.frontend.layer-panel :as layer-panel]
@@ -78,6 +79,7 @@
     (dom/append! footer (extension-view scope id descriptor) (layer-panel/mount! scope id descriptor))
     (bind-source! scope id descriptor code file meta filename status)
     (composition/attach! scope area descriptor planes value)
-    (outputs/attach! scope id descriptor request {"result" value "cell" cell "topology" topology})
+    (outputs/attach! scope id descriptor request
+                     {"result" value "cell" cell "topology" (fullscreen/mount! scope topology)})
     (inspection/attach! scope id request)
     root))

@@ -53,8 +53,8 @@
 
 (declare render!)
 
-(defn- linked-list! [container {:keys [top bottom list-layout]} references select]
-  (let [group (dom/svg "g" {:class "linked-list" :transform (str "translate(0 " (/ (+ top bottom) 2) ")")})]
+(defn- linked-list! [container {:keys [top bottom list-layout list-x]} references select]
+  (let [group (dom/svg "g" {:class "linked-list" :transform (str "translate(" (or list-x 0) " " (/ (+ top bottom) 2) ")")})]
     (doseq [{:keys [points dot]} (:links list-layout)]
       (dom/append! group (dom/svg "polyline" {:points (str/join " " (map #(str/join "," %) points))
                                               :fill "none" :stroke "#eee" :stroke-width 1})
@@ -63,18 +63,56 @@
       (if terminal?
         (dom/append! group (dom/svg "circle" {:cx x :cy y :r 3 :fill "#eee" :class "list-end"}))
         (let [box (dom/svg "g" {:class "list-element" :transform (str "translate(" x " " y ")")})]
-          (dom/append! box (frame-element node))
           (let [content (dom/svg "g" {})] (render! content node references select) (dom/append! box content))
           (dom/append! group box))))
     (dom/append! container group)))
 
+(defn- tree-branches! [container rows left]
+  (let [entries (into {} (map (juxt :tree-id identity)) (filter :tree-first? rows))
+        middle #(/ (+ (:top %) (:bottom %)) 2)]
+    (doseq [[_ row] entries
+            :let [parent (get entries (:tree-parent row))]
+            :when parent]
+      (let [x (+ left 4 (* viewport/tree-indent (:tree-depth parent)))
+            end (+ left 8 (* viewport/tree-indent (:tree-depth row)))
+            y (middle row)]
+        (dom/append! container
+                     (dom/svg "path" {:class "value-tree-branch" :fill "none"
+                                      :stroke "#888" :stroke-width 1
+                                      :d (str "M" x " " (middle parent) " V" y " H" end)}))))))
+
+(defn- fold-control! [container x y {:keys [expanded label] :as control}]
+  (let [button (dom/svg "text" {:x (- x 12) :y y :class "value-tree-toggle"
+                                :role "button" :tabindex 0 :aria-expanded (str expanded)
+                                :aria-label (str (if expanded "Fold " "Unfold ") label)})
+        toggle (fn [event]
+                 (.preventDefault event)
+                 (.stopPropagation event)
+                 (.dispatchEvent button (js/CustomEvent. "valuefold"
+                                           #js {:bubbles true :detail control})))]
+    (dom/text! button (if expanded "▾" "▸"))
+    (set! (.-onpointerdown button) #(.stopPropagation %))
+    (set! (.-onpointerup button) #(.stopPropagation %))
+    (set! (.-onclick button) toggle)
+    (set! (.-onkeydown button)
+          #(when (contains? #{"Enter" " "} (.-key %)) (toggle %)))
+    (dom/append! container button)))
+
 (defn render! [container node references select]
   (dom/replace! container)
-  (doseq [{:keys [text y top bottom role sourceToken sourceReference list-layout] :as row} (viewport/text-rows node)]
-    (cond
-      list-layout (linked-list! container row references select)
-      sourceToken
-      (let [width (+ 18 (viewport/text-width text)) left (- (/ width 2))]
-        (source-marker/render! container left (+ (/ (+ top bottom) 2) 3.5) sourceToken sourceReference references select)
-        (text! container (+ left 18) y text "start" role references select))
-      :else (text! container 0 y text "middle" role references select))))
+  (let [rows (viewport/text-rows node)
+        [width _] (viewport/node-size node)
+        left (+ (- (/ width 2)) viewport/outer-padding)]
+    (tree-branches! container rows left)
+    (doseq [{:keys [text y top bottom role sourceToken sourceReference list-layout tree? tree-depth] :as row} rows]
+      (let [x (if tree? (+ left 12 (* viewport/tree-indent tree-depth)) 0)]
+        (when-let [control (:foldControl row)]
+          (fold-control! container x y control))
+        (cond
+          list-layout
+          (linked-list! container (cond-> row tree? (assoc :list-x (+ x (/ (:width list-layout) 2)))) references select)
+          sourceToken
+          (let [width (+ 18 (viewport/text-width text)) start (if tree? x (- (/ width 2)))]
+            (source-marker/render! container start (+ (/ (+ top bottom) 2) 3.5) sourceToken sourceReference references select)
+            (text! container (+ start 18) y text "start" role references select))
+          :else (text! container x y text (if tree? "start" "middle") role references select))))))

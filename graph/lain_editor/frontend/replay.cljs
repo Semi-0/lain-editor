@@ -1,18 +1,19 @@
 (ns graph.lain-editor.frontend.replay
   "Playback of recorded graph data. Historical inspection never reads the live runtime."
   (:require [graph.lain-editor.frontend.dom :as dom]
-            [graph.lain-editor.frontend.graph :as graph]
+            [graph.lain-editor.frontend.effects :as effects]
+            [graph.lain-editor.frontend.value-view :as value-view]
             [graph.lain-editor.frontend.graph-updates :as updates]
             [graph.lain-editor.frontend.reactive :as rx]
             [graph.lain-editor.frontend.replay-model :as model]))
 
-(defn- historical-inspect [frame node _signal _chase]
-  (if-let [entry (some #(if (= node (:id %)) % nil) (get-in frame [:graph :nodes]))]
+(defn- historical-inspect [visible node _signal _chase]
+  (if-let [entry (some #(if (= node (:id %)) % nil) (:nodes visible))]
     (js/Promise.resolve {:historical true :selected {:name (:label entry) :kind (:kind entry)
                                     :valueGrid (:valueGrid entry) :contentGrid (:contentGrid entry)
                                     :summary (:value entry)}
                          :value (str (:label entry) "\n" (:value entry))
-                         :valueGrid (:valueGrid entry) :nodes (get-in frame [:graph :nodes])})
+                         :valueGrid (:valueGrid entry) :nodes (:nodes visible)})
     (js/Promise.reject (js/Error. "Node is not present in this recorded observation"))))
 
 (defn- playback! [scope state]
@@ -35,29 +36,68 @@
                          nil)))))
     (rx/own! scope clear!)))
 
-(defn- graph-view! [scope body state request]
-  (let [mounted (atom nil) previous (atom nil)
+(defn- graph-view! [scope body trail state request]
+  (let [mounted (atom nil) previous (atom nil) visible (atom nil)
+        ancestors (atom []) view-state (atom {}) folded-values (atom #{})
         clear! #(do (if-let [current @mounted] ((:dispose! (:handle current))) nil) (reset! mounted nil))
         selected (rx/derive! scope #(get (:frames %) (:index %)) state)]
-    (rx/watch! scope selected
-               (fn [frame]
-                 (let [next (:graph frame) changed (updates/changed-ids @previous next)]
-                   (if next
-                     (if (= (updates/shape next) (:shape @mounted))
-                       (do ((get-in @mounted [:handle :clear-detail!]))
-                           ((get-in @mounted [:handle :update!]) next changed))
-                       (do (clear!)
-                           (reset! mounted {:shape (updates/shape next)
-                                            :handle (graph/mount! body next
-                                                      (fn [node signal chase] (historical-inspect @selected node signal chase)) (fn [_] nil)
-                                                      (assoc request :parent "replay" :recorded true) changed)})))
-                     (do (clear!) (dom/replace! body (dom/element "span" "" "No observations in this time range"))))
-                   (reset! previous next))))
+    (letfn [(show! [next changed]
+              (reset! visible next)
+              (if next
+                (if (= [(:semanticScope next) (updates/shape next)] (:shape @mounted))
+                  (do ((get-in @mounted [:handle :clear-detail!]))
+                      ((get-in @mounted [:handle :update!]) next changed))
+                  (do (clear!)
+                      (reset! mounted
+                              {:shape [(:semanticScope next) (updates/shape next)]
+                               :handle
+                               (value-view/mount!
+                                body next
+                                (fn [node signal chase]
+                                  (historical-inspect @visible node signal chase))
+                                open-scope!
+                                (assoc request
+                                       :view-state view-state
+                                       :parent (:semanticScope next)
+                                       :recorded true)
+                                changed folded-values)})))
+                (do (clear!)
+                    (dom/replace! body
+                                  (dom/element "span" ""
+                                               "No observations in this time range"))))
+              (dom/replace! trail)
+              (when (seq @ancestors)
+                (dom/append! trail
+                             (dom/button "Back to enclosing scope"
+                                         #(let [parent (peek @ancestors)]
+                                            (swap! ancestors pop)
+                                            (show! parent #{})))
+                             (dom/element "span" "" (str " Scope depth " (count @ancestors))))))
+            (open-scope! [node]
+              (when-let [observation (:semanticObservation @visible)]
+                (-> (effects/api!
+                     (assoc (dissoc request :refresh)
+                            :op "inspect"
+                            :parent node
+                            :recordedObservation observation))
+                    (.then (fn [response]
+                             (swap! ancestors conj @visible)
+                             (show! (:graph response) #{})))
+                    (.catch #(dom/text! trail (.-message %))))))]
+      (rx/watch! scope selected
+                 (fn [frame]
+                   (let [next (:graph frame)
+                         changed (updates/changed-ids (:graph @previous) next)]
+                     (when (not= frame @previous)
+                       (reset! ancestors [])
+                       (show! next changed))
+                     (reset! previous frame)))))
     (rx/own! scope clear!)))
 
 (defn mount! [body timeline request]
   (let [scope (rx/scope) root (dom/element "div" "replay-view")
-        controls (dom/element "div" "replay-controls") canvas (dom/element "div" "replay-graph")
+        controls (dom/element "div" "replay-controls")
+        trail (dom/element "div" "semantic-scope-trail") canvas (dom/element "div" "replay-graph")
         state (rx/input! scope (model/initial (:frames timeline)))
         move! #(swap! state (fn [s] (assoc (model/seek s %) :playing? false)))
         back (dom/button "◁" #(move! (dec (:index @state))))
@@ -72,7 +112,7 @@
     (.setAttribute slider "type" "range") (.setAttribute slider "min" "0")
     (.setAttribute slider "step" "1") (.setAttribute slider "aria-label" "Recorded observation")
     (set! (.-oninput slider) #(move! (js/parseInt (.. % -target -value) 10)))
-    (dom/append! controls back play next slider label) (dom/append! root controls canvas)
+    (dom/append! controls back play next slider label) (dom/append! root controls trail canvas)
     (dom/replace! body root)
     (rx/watch! scope state
                (fn [{:keys [frames index playing?]}]
@@ -86,6 +126,6 @@
                                        (if (seq frames) (inc index) 0) "/" (count frames)))
                  (.setAttribute root "data-replay-index" (str index))))
     (playback! scope state)
-    (graph-view! scope canvas state request)
+    (graph-view! scope canvas trail state request)
     {:dispose! #(rx/dispose! scope)
      :update! #(swap! state model/replace-frames (:frames %))}))

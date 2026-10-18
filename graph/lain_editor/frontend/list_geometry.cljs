@@ -1,5 +1,5 @@
 (ns graph.lain-editor.frontend.list-geometry
-  "Pure wrapped box-and-dot geometry; each element uses the ordinary node layout.")
+  "Wrapped value-and-dot geometry. Value contents are not semantic graph nodes.")
 
 (def gap 24)
 (def wrap-width 420)
@@ -8,7 +8,7 @@
   (case kind
     "empty" nil
     ("pending" "unavailable" "ambiguous" "cycle" "improper" "contradiction")
-    {:kind "cell" :frame "cube" :label (str kind " tail") :valueGrid (or rows [])}
+    {:kind "cell" :label (str kind " tail") :valueGrid (or rows [])}
     (throw (ex-info "Unknown linked-list tail" {:kind kind}))))
 
 (defn- pack [tokens]
@@ -45,7 +45,7 @@
          :dot [(/ (+ (:x a) (:x b)) 2) middle]}))))
 
 (defn arrange [{:keys [items tail]} measure]
-  (let [nodes (mapv #(hash-map :kind "cell" :frame "cube" :label "" :valueGrid %) items)
+  (let [nodes (mapv #(hash-map :kind "cell" :label "" :valueGrid %) items)
         terminal (tail-node tail)
         nodes (if terminal (conj nodes terminal) nodes)
         tokens (mapv #(hash-map :node % :size (measure %)) nodes)

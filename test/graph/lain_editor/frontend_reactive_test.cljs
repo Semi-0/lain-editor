@@ -3,6 +3,8 @@
             [graph.lain-editor.frontend.presentation :as presentation]
             [graph.lain-editor.frontend.node-detail-model :as node-detail]
             [graph.lain-editor.frontend.list-geometry :as list-geometry]
+            [graph.lain-editor.frontend.graph-labels :as labels]
+            [graph.lain-editor.frontend.dom :as dom]
             [graph.lain-editor.frontend.source-marker :as source-marker]
             [cljs.test :refer-macros [deftest is async]]
             [javelin.core :as j :refer-macros [dosync]]
@@ -82,9 +84,52 @@
     (is (= (select-keys cell [:y :height])
            (select-keys propagator [:y :height])))
     (is (= 12 (:rx cell) (:ry cell)))
+    (is (= cell (viewport/node-frame {:kind "cell" :label "same" :frame "cube"}))
+        "Legacy presentation hints cannot turn cells into propagator-shaped cards")
     (is (= 0 (:rx propagator) (:ry propagator))))
   (is (thrown-with-msg? js/Error #"Unknown graph node kind"
                        (viewport/node-frame {:kind "unknown" :label "x"}))))
+
+(deftest propagator-subnets-do-not-reserve-preview-space
+  (let [propagator {:kind "propagator" :label "amb"}
+        scoped (assoc propagator :semanticScope "compiler-wiring")
+        value-cell {:kind "cell" :label "knowledge"
+                    :valueGrid [{:key "learned no-goods" :value "2" :depth 0}]}]
+    (is (= (viewport/node-size propagator) (viewport/node-size scoped)))
+    (is (= (viewport/text-rows propagator) (viewport/text-rows scoped)))
+    (is (some #(= "2" (:text %)) (viewport/text-rows value-cell)))
+    (is (= (viewport/node-size value-cell)
+           (viewport/node-size (assoc value-cell :semanticScope "compound-value"))))))
+
+(defn- rendered-value-elements [node]
+  (let [element (fn [tag attrs] {:tag tag :attrs attrs :children (atom [])})
+        root (element "g" {})]
+    (with-redefs [dom/svg element
+                  dom/append! (fn [parent & children] (swap! (:children parent) into children))
+                  dom/replace! (fn [parent & children] (reset! (:children parent) (vec children)))
+                  dom/text! (fn [element text] (swap! (:children element) conj text))]
+      (labels/render! root node {} identity))
+    (filter map? (tree-seq map? #(when (map? %) @(:children %)) root))))
+
+(deftest nested-cell-values-use-a-tree-with-real-parent-entries
+  (let [entries [{:key "learned no-goods" :value "2" :depth 0}
+                 {:key "no-good 1" :value "forbidden combination" :depth 1}
+                 {:key "reject alternative" :value "0" :depth 2}
+                 {:key "no-good 2" :value "forbidden combination" :depth 1}]
+        node {:kind "cell" :label "knowledge" :valueGrid entries}
+        rows (viewport/text-rows node)
+        roots (filter :tree-first? rows)]
+    (is (= [nil 0 1 0] (mapv :tree-parent roots)))
+    (is (= [0 1 2 1] (mapv :tree-depth roots)))
+    (is (= 3 (count (filter #(= "value-tree-branch" (get-in % [:attrs :class]))
+                            (rendered-value-elements node)))))
+    (is (= ["learned no goods" "no good 1" "reject alternative" "no good 2"]
+           (mapv :text roots)))
+    (is (> (first (viewport/node-size node))
+           (first (viewport/node-size (assoc node :valueGrid (mapv #(assoc % :depth 0) entries))))))
+    (is (= (+ 2 (count rows))
+           (count (viewport/text-rows (assoc node :valueGrid (conj entries {:key "context" :value "unconditional" :depth 2})))))
+        "Growth adds rows without replacing earlier value entries")))
 
 (deftest inspection-rejects-stale-and-disposed-responses
   (async done
@@ -292,10 +337,27 @@
     (is (<= (:width layout) list-geometry/wrap-width))
     (is (> (count (set (map :row boxes))) 1))
     (is (= 1 (count (filter :terminal? (:items layout)))))
-    (is (every? #(zero? (:rx (viewport/node-frame (:node %)))) boxes))
+    (is (every? #(= 12 (:rx (viewport/node-frame (:node %)))) boxes))
     (doseq [{:keys [x y size]} boxes]
       (is (<= (+ (abs x) (/ (first size) 2)) (/ (:width layout) 2)))
       (is (<= (+ (abs y) (/ (second size) 2)) (/ (:height layout) 2))))))
+
+(deftest list-values-do-not-render-semantic-node-frames
+  (let [element (fn [tag attrs] {:tag tag :attrs attrs :children (atom [])})
+        root (element "g" {})]
+    (with-redefs [dom/svg element
+                  dom/append! (fn [parent & children] (swap! (:children parent) into children))
+                  dom/replace! (fn [parent & children] (reset! (:children parent) (vec children)))
+                  dom/text! (fn [node text] (swap! (:children node) conj text))]
+      (labels/render! root {:kind "cell" :label "domain"
+                            :valueGrid [{:key "" :value "" :depth 0
+                                         :linkedList {:items [[{:key "" :value "1" :depth 0}]
+                                                              [{:key "" :value "2" :depth 0}]]
+                                                      :tail {:kind "empty"}}}]} {} identity))
+    (let [elements (filter map? (tree-seq map? #(when (map? %) @(:children %)) root))]
+      (is (not-any? #(= "rect" (:tag %)) elements)
+          "Data contents must not masquerade as propagator or cell cards")
+      (is (= 2 (count (filter #(= "list-element" (get-in % [:attrs :class])) elements)))))))
 
 (deftest linked-list-empty-and-pending-tails-are-distinct
   (let [empty (list-geometry/arrange {:items [] :tail {:kind "empty"}} viewport/node-size)

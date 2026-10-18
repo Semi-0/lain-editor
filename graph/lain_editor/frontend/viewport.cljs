@@ -62,8 +62,20 @@
 
 (declare node-size)
 
-(defn- subsection-rows [{:keys [key value depth sourceToken sourceReference linkedList]}]
-  (let [title (presentation/display-text (str (apply str (repeat (or depth 0) "·")) key))
+(def tree-indent 20)
+
+(defn- tree-entries [sections]
+  (:entries
+   (reduce (fn [{:keys [ancestors entries]} [index section]]
+             (let [depth (or (:depth section) 0)]
+               {:ancestors (assoc (into {} (filter #(< (key %) depth)) ancestors) depth index)
+                :entries (conj entries (assoc section :tree? true :tree-id index
+                                                      :tree-parent (get ancestors (dec depth))))}))
+           {:ancestors {} :entries []} (map-indexed vector sections))))
+
+(defn- subsection-rows [{:keys [key value depth sourceToken sourceReference linkedList
+                               tree? tree-id tree-parent foldControl]}]
+  (let [title (presentation/display-text key)
         content (presentation/display-text value)
         titles (if (seq title)
                  (mapv #(hash-map :text % :role :subtitle :gap-before 0) (wrap-line title))
@@ -82,7 +94,15 @@
                        (range) (wrap-grid content (if sourceToken 20 max-columns)))
                  :else [])
         rows (into titles values)]
-    (if (seq rows) (assoc-in rows [0 :gap-before] section-gap) [])))
+    (if (seq rows)
+      (mapv (fn [index row]
+              (cond-> row
+                (zero? index) (assoc :gap-before section-gap)
+                (and (zero? index) foldControl) (assoc :foldControl foldControl)
+                tree? (assoc :tree? true :tree-id tree-id :tree-parent tree-parent
+                             :tree-depth (or depth 0) :tree-first? (zero? index))))
+            (range) rows)
+      [])))
 
 (defn- rows-height [rows]
   (+ (* 2 outer-padding) (reduce + (map #(+ (or (:height %) (row-height (:role %))) (:gap-before %)) rows))))
@@ -90,7 +110,10 @@
 (defn text-rows [node]
   (let [caption (node-caption node)
         header (if (seq caption) (mapv #(hash-map :text % :role :name :gap-before 0) (wrap-line caption)) [])
-        all-rows (into header (mapcat subsection-rows) (section-data node))
+        sections (section-data node)
+        sections (if (some #(or (:foldControl %) (pos? (or (:depth %) 0))) sections)
+                   (tree-entries sections) sections)
+        all-rows (into header (mapcat subsection-rows) sections)
         rows (if (seq all-rows) (assoc-in all-rows [0 :gap-before] 0) all-rows)
         top (+ (- (/ (rows-height rows) 2)) outer-padding)]
     (:rows
@@ -106,19 +129,21 @@
 
 (defn node-lines [node] (mapv :text (text-rows node)))
 
+(defn- row-width [row]
+  (+ (or (:width row)
+         (+ (text-width (:text row) (:role row)) (if (:sourceToken row) 18 0)))
+     (if (:tree? row) (+ 12 (* tree-indent (:tree-depth row))) 0)))
+
 (defn node-size [node]
   (let [rows (text-rows node)]
     [(max 44 (+ (* 2 outer-padding)
-                 (js/Math.ceil (apply max 0 (map (fn [row]
-                                                  (or (:width row)
-                                                      (+ (text-width (:text row) (:role row))
-                                                         (if (:sourceToken row) 18 0)))) rows)))))
+                 (js/Math.ceil (apply max 0 (map row-width rows)))))
      (rows-height rows)]))
 
 (defn node-frame [node]
   (let [[width height] (node-size node)
         radius (case (:kind node)
-                 "cell" (if (= "cube" (:frame node)) 0 12)
+                 "cell" 12
                  "propagator" 0
                  (throw (ex-info "Unknown graph node kind" {:kind (:kind node)})))]
     {:x (- (/ width 2)) :y (- (/ height 2)) :width width :height height
@@ -161,6 +186,11 @@
 (defn fit-layout [points view]
   ;; Translation and canvas growth preserve every solver clearance and crossing.
   {:points points :view (fit-view points view)})
+
+(defn grow-view
+  "Expose more canvas after a container resize without changing pan or zoom."
+  [view {:keys [width height]}]
+  (assoc view :width (max (:width view) width) :height (max (:height view) height)))
 
 (defn zoom-view [view point factor]
   (let [scale (max 0.001 (min 8 (* (:scale view) factor))) ratio (/ scale (:scale view))]

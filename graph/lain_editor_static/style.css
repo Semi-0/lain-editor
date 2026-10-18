@@ -236,5 +236,25 @@ footer { height: 31px; flex: none; display: flex; align-items: center; gap: 8px;
 .node-value-section { width: fit-content; min-width: 100%; margin: 0 auto 16px; }
 .node-value-section:last-child { margin-bottom: 0; }
 
+.value-view-composition { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.value-view-canvas { flex: 1; min-height: 0; }
+.value-fold-menu { position: relative; align-self: flex-start; margin: 4px 8px; z-index: 5; }
+.value-fold-popup { top: 100%; bottom: auto; left: 0; right: auto; width: min(420px, 75vw); }
+.value-fold-popup select { display: block; width: 100%; margin: 8px 0; }
+.value-fold-fields { max-height: 300px; overflow: auto; }
+.value-fold-field { display: flex; align-items: center; gap: 8px; padding: 4px; font-size: 12px; }
+.value-fold-field span { overflow-wrap: anywhere; }
+.value-fold-field input { flex: none; }
+
 .graph-svg polyline, .linked-list > polyline { stroke: var(--wire-color); }
 .graph-svg marker path, .linked-list > circle { fill: var(--wire-color); }
+.graph-node .value-tree-toggle { pointer-events: auto; cursor: pointer; fill: var(--text, #ddd); font-size: 13px; }
+.value-tree-toggle:focus { outline: 1px solid currentColor; }
+.layout-controls { display: flex; align-items: center; gap: 8px; padding: 4px 8px; flex-wrap: wrap; }
+.layout-controls select { margin-left: 4px; }
+.topology-fullscreen-shell { display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 0; background: var(--background); }
+.topology-fullscreen-toolbar { display: flex; align-items: center; gap: 8px; padding: 4px 8px; flex: none; }
+.topology-fullscreen-content { flex: 1 1 0; min-height: 0; }
+.topology-fullscreen-shell:fullscreen { width: 100vw; height: 100vh; padding: 8px; box-sizing: border-box; }
+.topology-fullscreen-shell:-webkit-full-screen { width: 100vw; height: 100vh; padding: 8px; box-sizing: border-box; }
+.fullscreen-status { font-size: 11px; }

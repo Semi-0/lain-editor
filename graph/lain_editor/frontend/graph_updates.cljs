@@ -3,7 +3,9 @@
   (:require [clojure.set :as set]))
 
 (defn shape [graph]
-  {:nodes (into {} (map (juxt :id :kind)) (:nodes graph))
+  {:nodes (into {} (map (fn [node]
+                          [(:id node) (:kind node)]))
+                (:nodes graph))
    :edges (set (map #(select-keys % [:from :to :bidirectional]) (:edges graph)))})
 
 (defn changed-ids [before after]

@@ -5,6 +5,7 @@
             [graph.lain-editor.frontend.graph-labels :as labels]
             [graph.lain-editor.frontend.node-detail :as node-detail]
             [graph.lain-editor.frontend.graph-layout :as layout]
+            [graph.lain-editor.frontend.layout-controls :as layout-controls]
             [graph.lain-editor.frontend.graph-motion :as motion]
             [graph.lain-editor.frontend.node-flash :as flash]
             [graph.lain-editor.frontend.reactive :as rx]))
@@ -33,7 +34,8 @@
                                             :width (+ width 8) :height (+ height 8) :fill "transparent"})]
                    (labels/render! label node references select) (dom/text! title (labels/description node))
                    (set! (.-onkeydown group) #(when (= "Enter" (.-key %)) (select node)))
-                   (dom/append! group hit shape label title) (dom/append! world group)
+                   (dom/append! group hit shape label title)
+                   (dom/append! world group)
                    {:node node :group group :frame shape :label label :title title :hit hit :width width :height height})) (:nodes graph))]
     {:lines lines :nodes nodes :dimensions (into {} (map #(vector (get-in % [:node :id]) %) nodes))}))
 
@@ -108,7 +110,12 @@
       (rx/own! scope #(.removeEventListener canvas "wheel" wheel)))))
 
 (defn mount! [body graph inspect expand request changed]
-  (let [scope (rx/scope) wrapper (dom/element "div" "graph-wrap")
+  (let [scope (rx/scope)
+        view-state (:view-state request)
+        view-key [(:pane request) (:generation request) (:semanticScope graph)]
+        saved (when view-state (get @view-state view-key))
+        layout-settings (atom (merge {:budgetMs 1000 :spacing 1} (:layoutSettings saved)))
+        wrapper (dom/element "div" "graph-wrap")
         scroller (dom/element "div" "graph-scroller")
         canvas (dom/svg "svg" {:class "graph-svg" :viewBox "0 0 760 330" :aria-label "Semantic topology"})
         world (dom/svg "g" {}) marker-id (str "arrow-" (random-uuid))
@@ -117,11 +124,12 @@
         both (dom/svg "marker" {:id (str marker-id "-both") :viewBox "0 0 14 10" :refX 7 :refY 5
                                 :markerWidth 12 :markerHeight 8 :orient "auto"})
         detail (dom/element "div" "graph-detail")
-        initial (viewport/initial-points (:nodes graph))
+        initial (if (= (set (map :id (:nodes graph))) (set (keys (:points saved))))
+                  (:points saved) (viewport/initial-points (:nodes graph)))
         layout-points (rx/input! scope initial)
         points (rx/input! scope initial)
         held-id (atom nil)
-        view (rx/input! scope {:x 380 :y 165 :width 760 :height 330 :scale 1})
+        view (rx/input! scope (or (:view saved) {:x 380 :y 165 :width 760 :height 330 :scale 1}))
         current (atom graph)
         frame! (fn [coordinates]
                  (let [camera (viewport/fit-view coordinates {:width (max 1 (.-clientWidth scroller))
@@ -138,7 +146,7 @@
                       (viewport/clear-points incoming)))
         animation (motion/mount! scope canvas points layout-points constrain)
         fit #(do ((:finish! animation)) (frame! @points))
-        first-layout? (atom true)
+        first-layout? (atom (nil? saved))
         interacted? (atom false)
         present! (fn [result animate?]
                    (when (compare-and-set! first-layout? true false)
@@ -151,12 +159,34 @@
     (dom/append! marker (dom/svg "path" {:d "M0 0 L10 5 L0 10 Z" :fill "#ddd"}))
     (dom/append! both (dom/svg "path" {:d "M0 5 L5 0 L5 10 Z M14 5 L9 0 L9 10 Z" :fill "#ddd"}))
     (dom/append! defs marker both) (dom/append! canvas defs world)
-    (set! (.-hidden status) true)
     (dom/append! scroller canvas)
-    (dom/append! wrapper status scroller detail) (dom/replace! body wrapper)
+    (dom/append! wrapper status)
+    (let [summary (dom/element "div" "semantic-summary"
+                               (str (count (:nodes graph)) " nodes · "
+                                    (count (:edges graph)) " edges"))]
+      (dom/append! wrapper summary))
+    (when (or (:partial graph) (seq (:diagnostics graph)))
+      (dom/append! wrapper (dom/element "div" "semantic-diagnostics"
+                                      (str (when (:partial graph) "Partial capture. ")
+                                           (apply str (interpose " · " (map :message (:diagnostics graph))))))))
+    (dom/append! wrapper scroller detail) (dom/replace! body wrapper)
     (let [elements (atom (graph-elements world graph marker-id select))
           drawing (rx/derive! scope vector points view)
-          controller (layout/attach! scope request graph present! #(dom/text! status %))]
+          controller (layout/attach! scope (assoc request :layout-settings layout-settings)
+                                     graph present! #(dom/text! status %))]
+      (layout-controls/mount! wrapper (:refine! controller) (:spacing! controller) @layout-settings)
+      (let [observer (js/ResizeObserver.
+                      (fn [_]
+                        (let [next (viewport/grow-view @view
+                                     {:width (max 1 (.-clientWidth scroller))
+                                      :height (max 1 (.-clientHeight scroller))})]
+                          (when (not= next @view)
+                            (attributes! canvas {:viewBox (str "0 0 " (:width next) " " (:height next))})
+                            (set! (.. canvas -style -width) (str (:width next) "px"))
+                            (set! (.. canvas -style -height) (str (:height next) "px"))
+                            (reset! view next)))))]
+        (.observe observer scroller)
+        (rx/own! scope #(.disconnect observer)))
       (dom/listen! scope (.closest body ".pane") "lain-fit-graph" (fn [_] (fit)))
       (rx/watch! scope drawing #(draw! world @elements %))
       (doseq [event ["pointerdown" "wheel"]]
@@ -168,9 +198,17 @@
                       #(when-let [node (some (fn [n] (when (= % (:id n)) n)) (:nodes @current))] (select node))
                       (:move! controller))
       (doseq [item (:nodes @elements) :when (changed (get-in item [:node :id]))] (pulse! item))
-      (fit)
-      {:dispose! #(rx/dispose! scope)
+      (if saved
+        (do (attributes! canvas {:viewBox (str "0 0 " (:width @view) " " (:height @view))})
+            (set! (.. canvas -style -width) (str (:width @view) "px"))
+            (set! (.. canvas -style -height) (str (:height @view) "px")))
+        (fit))
+      {:dispose! #(do (when view-state
+                        (swap! view-state assoc view-key {:view @view :points @points
+                                                        :layoutSettings @layout-settings}))
+                      (rx/dispose! scope))
        :clear-detail! (:clear! inspection)
+       :refresh-detail! (:refresh! inspection)
        :update! (fn [graph changed]
                   (let [old (into {} (map #(vector (get-in % [:node :id]) %) (:nodes @elements)))
                         references (into {} (mapcat (fn [node] (map #(vector % node) (:referenceTokens node)))) (:nodes graph))
