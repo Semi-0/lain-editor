@@ -2,6 +2,7 @@
   "Text-sized node geometry and framing that preserves Vijual layout coordinates."
   (:require [clojure.string :as str]
             [graph.lain-editor.frontend.presentation :as presentation]
+            [graph.lain-editor.node-clearance :as clearance]
             [graph.lain-editor.frontend.list-geometry :as list-geometry]))
 
 (defn node-caption [node] (presentation/display-text (or (:caption node) (:label node))))
@@ -125,13 +126,22 @@
 
 (defn point [node]
   (let [[x y] (:position node) [w h] (:size node)]
-    {:x x :y y :width (+ w 10) :height (+ h 14)}))
+    {:x x :y y :width w :height h}))
+
+(defn clear-points
+  ([points] (clear-points points nil))
+  ([points anchor-id]
+   (let [nodes (mapv (fn [[id {:keys [x y width height]}]]
+                       {:id id :position [x y] :size [width height]}) points)]
+     (reduce (fn [result {:keys [id position]}]
+               (assoc result id (assoc (get points id) :x (first position) :y (second position))))
+             {} (clearance/separate nodes anchor-id)))))
 
 (defn initial-points [nodes]
-  (into {} (map-indexed (fn [index node]
+  (clear-points (into {} (map-indexed (fn [index node]
                          [(:id node) (point {:position [(* 100 (js/Math.cos (* index 2.39996)))
                                                        (* 100 (js/Math.sin (* index 2.39996)))]
-                                           :size (node-size node)})]) nodes)))
+                                           :size (node-size node)})]) nodes))))
 
 (defn bounds [points]
   (when (seq points)

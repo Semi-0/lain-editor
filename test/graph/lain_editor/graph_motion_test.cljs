@@ -2,6 +2,8 @@
   (:require [cljs.test :refer-macros [deftest is]]
             [graph.lain-editor.frontend.graph-motion :as motion]
             [graph.lain-editor.frontend.graph-updates :as updates]
+            [graph.lain-editor.frontend.viewport :as viewport]
+            [graph.lain-editor.node-clearance :as clearance]
             [graph.lain-editor.frontend.node-flash :as flash]
             [graph.lain-editor.frontend.reactive :as rx]))
 
@@ -28,16 +30,51 @@
     (is (= {"a" {:x 10 :y 20 :width 60 :height 38}} (motion/interpolate a b 0.5)))
     (is (= b (motion/interpolate {} b 0.5)))))
 
-(deftest solver-plan-keeps-one-camera-and-finishes-at-compact-screen-coordinates
+(deftest crossing-animation-trajectories-cannot-overlap-at-intermediate-times
+  (let [a {"a" {:x -200 :y 0 :width 100 :height 70}
+           "b" {:x 200 :y 0 :width 100 :height 70}}
+        b {"a" {:x 200 :y 0 :width 100 :height 70}
+           "b" {:x -200 :y 0 :width 100 :height 70}}]
+    (doseq [t [0 0.1 0.25 0.5 0.75 0.9 1]]
+      (let [points (motion/interpolate a b t)
+            nodes (mapv (fn [[id {:keys [x y width height]}]]
+                          {:id id :position [x y] :size [width height]}) points)]
+        (is (not (apply clearance/conflict? nodes))))))
+  (let [points {"a" {:x 0 :y 0 :width 100 :height 70}
+                "b" {:x 0 :y 0 :width 100 :height 70}}
+        held (viewport/clear-points points "b")]
+    (is (= (get points "b") (get held "b")))
+    (is (not= (get points "a") (get held "a")))))
+
+(deftest solver-plan-keeps-world-coordinates-without-a-camera
   (let [node (fn [x y] {:id "a" :position [x y] :size [28 24]})
         frames [{:iteration 0 :nodes [(node -100 -80)]} {:iteration 10 :nodes [(node 100 80)]}]
-        compact {:points {"a" {:x 20 :y 30 :width 38 :height 38}}
-                 :view {:x 11 :y 12 :width 400 :height 300 :scale 1}}
-        plan (motion/plan frames compact)]
+        target {"a" {:x 20 :y 30 :width 38 :height 38}}
+        plan (motion/plan frames target)]
     (is (= [-100 100] (mapv #(get-in % ["a" :x]) (:samples plan))))
-    (is (= 31 (+ (get-in plan [:target "a" :x]) (get-in plan [:view :x]))))
-    (is (= 42 (+ (get-in plan [:target "a" :y]) (get-in plan [:view :y]))))
-    (is (= 1 (get-in plan [:view :scale])))))
+    (is (= target (:target plan)))
+    (is (not (contains? plan :view)))))
+
+(deftest incoming-layouts-respect-only-the-currently-held-anchor
+  (let [media (aget js/global "matchMedia")
+        scope (rx/scope) held (atom "a")
+        points (rx/input! scope {"a" {:x 30 :y 40 :width 28 :height 24}})
+        layout (rx/input! scope {})
+        canvas #js {:setAttribute (fn [_ _])}
+        constrain (fn [incoming]
+                    (if-let [id @held]
+                      (assoc incoming id (get @points id))
+                      incoming))
+        result {:nodes [{:id "a" :position [100 200] :size [28 24]}]}]
+    (try
+      (aset js/global "matchMedia" (fn [_] #js {:matches true}))
+      (let [animation (motion/mount! scope canvas points layout constrain)]
+        ((:play! animation) result false)
+        (is (= [30 40] ((juxt :x :y) (get @points "a"))))
+        (reset! held nil)
+        ((:play! animation) result false)
+        (is (= [100 200] ((juxt :x :y) (get @points "a")))))
+      (finally (rx/dispose! scope) (aset js/global "matchMedia" media)))))
 
 (deftest motion-finishes-and-cancels-owned-animation-frames
   (let [raf (aget js/global "requestAnimationFrame") cancel (aget js/global "cancelAnimationFrame")
@@ -45,9 +82,8 @@
         reduced (atom false) attrs (atom {}) scope (rx/scope)
         canvas #js {:style #js {} :setAttribute (fn [key value] (swap! attrs assoc key value))}
         node (fn [x] {:id "a" :position [x 0] :size [28 24]})
-        compact {:points {"a" {:x 0 :y 0 :width 38 :height 38}}
-                 :view {:x 31 :y 31 :width 300 :height 200 :scale 1}}
-        points (rx/input! scope {}) view (rx/input! scope (:view compact))
+        camera {:x -57 :y 83 :width 300 :height 200 :scale 0.25}
+        points (rx/input! scope {}) view (rx/input! scope camera)
         layout (rx/input! scope {}) result {:nodes [(node 100)] :iterationsUsed 10
                                             :frames [{:iteration 0 :nodes [(node 0)]}
                                                      {:iteration 10 :nodes [(node 100)]}]}]
@@ -55,22 +91,31 @@
       (aset js/global "requestAnimationFrame" (fn [f] (let [id (swap! counter inc)] (swap! pending assoc id (fn [time] (swap! pending dissoc id) (f time))) id)))
       (aset js/global "cancelAnimationFrame" (fn [id] (swap! canceled conj id) (swap! pending dissoc id)))
       (aset js/global "matchMedia" (fn [_] #js {:matches @reduced}))
-      (let [motion (motion/mount! scope canvas points view layout (constantly compact))]
+      (let [motion (motion/mount! scope canvas points layout)]
         ((:play! motion) result true)
         (is ((:active? motion))) (is (= 1 (count @pending)))
         ((first (vals @pending)) 0)
         (is ((:active? motion))) (is (= 1 (count @pending)))
         ((:finish! motion))
         (is (not ((:active? motion)))) (is (= "settled" (get @attrs "data-layout-phase")))
-        (is (= (:points compact) @points))
+        (is (= (motion/point-map (:nodes result)) @points))
+        (is (= camera @view) "Finishing a layout must preserve pan and zoom")
+        (is (nil? (get @attrs "viewBox")))
+        (is (nil? (.. canvas -style -width)))
+        (is (nil? (.. canvas -style -height)))
+        ((:play! motion) (assoc result :nodes [(node 250)]) false)
+        (is (= 250 (get-in @points ["a" :x])) "Drag responses still update solver positions")
+        (is (= camera @view) "Nonanimated drag responses must not reframe")
+        (is (nil? (get @attrs "viewBox")))
         ((:play! motion) result true)
         (rx/dispose! scope)
         (is (empty? @pending)) (is (= 2 (count @canceled))))
-      (let [scope (rx/scope) points (rx/input! scope {}) view (rx/input! scope {}) layout (rx/input! scope {})]
+      (let [scope (rx/scope) points (rx/input! scope {}) layout (rx/input! scope {})]
         (reset! reduced true)
-        (let [motion (motion/mount! scope canvas points view layout (constantly compact))]
+        (let [motion (motion/mount! scope canvas points layout)]
           ((:play! motion) result true)
-          (is (not ((:active? motion)))) (is (empty? @pending)) (is (= (:points compact) @points)))
+          (is (not ((:active? motion)))) (is (empty? @pending))
+          (is (= (motion/point-map (:nodes result)) @points)))
         (rx/dispose! scope))
       (finally
         (rx/dispose! scope)

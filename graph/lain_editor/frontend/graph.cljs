@@ -66,7 +66,7 @@
           (attributes! line {:points (str (point start) " " (point (/ (+ start end) 2)) " " (point end))}))
         (.setAttribute line "visibility" "hidden")))))
 
-(defn- pointer-input! [scope canvas points view select commit]
+(defn- pointer-input! [scope canvas points view held-id select commit]
   (let [drag (atom nil)
         local (fn [event]
                 (let [p (.matrixTransform (js/DOMPoint. (.-clientX event) (.-clientY event))
@@ -76,26 +76,31 @@
                  (fn [event]
                    (let [hit (.closest (.-target event) "[data-node-id]")
                          id (when hit (.. hit -dataset -nodeId))]
-                     (reset! drag {:point (local event) :id id :view @view :moved? false})
+                     (reset! held-id id)
+                     (reset! drag {:point (local event) :id id :view @view
+                                   :node-point (get @points id) :moved? false})
                      (.setPointerCapture canvas (.-pointerId event)))))
     (dom/listen! scope canvas "pointermove"
                  (fn [event]
-                   (when-let [{:keys [point id] original :view} @drag]
+                   (when-let [{:keys [point id node-point] original :view} @drag]
                      (let [p (local event) dx (- (:x p) (:x point)) dy (- (:y p) (:y point))]
                        (when (> (js/Math.hypot dx dy) 3) (swap! drag assoc :moved? true))
                        (if (contains? @points id)
-                         (swap! points update id assoc :x (/ (- (:x p) (:x @view)) (:scale @view))
-                                :y (/ (- (:y p) (:y @view)) (:scale @view)))
+                         (swap! points #(viewport/clear-points
+                                         (update % id assoc
+                                                 :x (+ (:x node-point) (/ dx (:scale original)))
+                                                 :y (+ (:y node-point) (/ dy (:scale original)))) id))
                          (swap! view assoc :x (+ (:x original) dx) :y (+ (:y original) dy)))))))
     (dom/listen! scope canvas "pointerup"
                  (fn [_]
+                   (reset! held-id nil)
                    (let [{:keys [id moved?]} @drag]
                      (cond
-                       (and id moved?) (commit [{:id id :position [(:x (get @points id)) (:y (get @points id))]}])
+                       (and id moved?) (commit (mapv (fn [[id p]] {:id id :position [(:x p) (:y p)]}) @points))
                        id (select id)
                        :else nil))
                    (reset! drag nil)))
-    (dom/listen! scope canvas "pointercancel" (fn [_] (reset! drag nil)))
+    (dom/listen! scope canvas "pointercancel" (fn [_] (reset! held-id nil) (reset! drag nil)))
     (let [wheel (fn [event]
                   (.preventDefault event)
                   (swap! view viewport/zoom-view (local event) (if (neg? (.-deltaY event)) 1.1 (/ 1 1.1))))]
@@ -115,12 +120,30 @@
         initial (viewport/initial-points (:nodes graph))
         layout-points (rx/input! scope initial)
         points (rx/input! scope initial)
+        held-id (atom nil)
         view (rx/input! scope {:x 380 :y 165 :width 760 :height 330 :scale 1})
         current (atom graph)
-        framing #(viewport/fit-layout @layout-points {:width (max 1 (.-clientWidth scroller))
-                                                     :height (max 1 (.-clientHeight scroller))})
-        animation (motion/mount! scope canvas points view layout-points framing)
-        fit (:finish! animation)
+        frame! (fn [coordinates]
+                 (let [camera (viewport/fit-view coordinates {:width (max 1 (.-clientWidth scroller))
+                                                              :height (max 1 (.-clientHeight scroller))})]
+                   (attributes! canvas {:viewBox (str "0 0 " (:width camera) " " (:height camera))})
+                   (set! (.. canvas -style -width) (str (:width camera) "px"))
+                   (set! (.. canvas -style -height) (str (:height camera) "px"))
+                   (reset! view camera)))
+        constrain (fn [incoming]
+                    (if-let [id @held-id]
+                      (let [position (get @points id)]
+                        (viewport/clear-points
+                         (update incoming id assoc :x (:x position) :y (:y position)) id))
+                      (viewport/clear-points incoming)))
+        animation (motion/mount! scope canvas points layout-points constrain)
+        fit #(do ((:finish! animation)) (frame! @points))
+        first-layout? (atom true)
+        interacted? (atom false)
+        present! (fn [result animate?]
+                   (when (compare-and-set! first-layout? true false)
+                     (when-not @interacted? (frame! (motion/point-map (:nodes result)))))
+                   ((:play! animation) result animate?))
         pulse! (flash/mount! scope)
         status (dom/element "span" "layout-status")
         inspection (node-detail/mount! scope detail inspect expand)
@@ -133,14 +156,15 @@
     (dom/append! wrapper status scroller detail) (dom/replace! body wrapper)
     (let [elements (atom (graph-elements world graph marker-id select))
           drawing (rx/derive! scope vector points view)
-          controller (layout/attach! scope request graph (:play! animation) #(dom/text! status %))
-          observer (js/ResizeObserver. (fn [_] (fit)))]
+          controller (layout/attach! scope request graph present! #(dom/text! status %))]
       (dom/listen! scope (.closest body ".pane") "lain-fit-graph" (fn [_] (fit)))
       (rx/watch! scope drawing #(draw! world @elements %))
-      (.observe observer scroller) (rx/own! scope #(.disconnect observer))
-      (dom/listen! scope canvas "pointerdown" (fn [_] (when ((:active? animation)) (fit))))
-      (dom/listen! scope canvas "wheel" (fn [_] (when ((:active? animation)) (fit))))
-      (pointer-input! scope canvas points view
+      (doseq [event ["pointerdown" "wheel"]]
+        (dom/listen! scope canvas event
+                     (fn [_]
+                       (reset! interacted? true)
+                       (when ((:active? animation)) ((:finish! animation))))))
+      (pointer-input! scope canvas points view held-id
                       #(when-let [node (some (fn [n] (when (= % (:id n)) n)) (:nodes @current))] (select node))
                       (:move! controller))
       (doseq [item (:nodes @elements) :when (changed (get-in item [:node :id]))] (pulse! item))
@@ -157,5 +181,11 @@
                     (swap! elements assoc :nodes items :dimensions (into {} (map #(vector (get-in % [:node :id]) %) items)))
                     (doseq [item items :when (changed (get-in item [:node :id]))] (pulse! item))
                     (if resized?
-                      (do (fit) ((:update! controller) graph))
+                      (let [sized (reduce (fn [positions node]
+                                            (let [[w h] (viewport/node-size node)]
+                                              (update positions (:id node) assoc :width w :height h)))
+                                          @points (:nodes graph))]
+                        (reset! layout-points (viewport/clear-points sized))
+                        ((:finish! animation))
+                        ((:update! controller) graph))
                       (draw! world @elements [@points @view]))))})))

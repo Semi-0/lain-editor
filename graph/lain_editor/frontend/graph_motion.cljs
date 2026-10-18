@@ -1,33 +1,19 @@
 (ns graph.lain-editor.frontend.graph-motion
-  "Replay real solver milestones in one camera, then settle into compact framing."
-  (:require [javelin.core :refer-macros [dosync]]
-            [graph.lain-editor.frontend.viewport :as viewport]
+  "Replay solver coordinates independently of the mounted graph's camera."
+  (:require [graph.lain-editor.frontend.viewport :as viewport]
             [graph.lain-editor.frontend.reactive :as rx]))
 
 (defn point-map [nodes]
-  (into {} (map (fn [node] [(:id node) (viewport/point node)])) nodes))
+  (viewport/clear-points (into {} (map (fn [node] [(:id node) (viewport/point node)])) nodes)))
 
 (defn interpolate [before after t]
-  (into {} (map (fn [[id target]]
+  (viewport/clear-points (into {} (map (fn [[id target]]
                   (let [source (get before id target)]
                     [id (assoc target :x (+ (:x source) (* t (- (:x target) (:x source))))
-                                      :y (+ (:y source) (* t (- (:y target) (:y source)))))]))) after))
+                                      :y (+ (:y source) (* t (- (:y target) (:y source)))))]))) after)))
 
-(defn plan [frames compact]
-  (let [samples (mapv #(point-map (:nodes %)) frames)
-        all (into {} (for [[index points] (map-indexed vector samples) [id point] points] [[index id] point]))
-        camera (viewport/fit-view all (:view compact))
-        target (into {} (map (fn [[id p]]
-                              [id (-> p (update :x + (- (get-in compact [:view :x]) (:x camera)))
-                                        (update :y + (- (get-in compact [:view :y]) (:y camera))))])) (:points compact))]
-    {:samples samples :target target :view camera}))
-
-(defn scene! [canvas points view scene]
-  (let [camera (:view scene)]
-    (.setAttribute canvas "viewBox" (str "0 0 " (:width camera) " " (:height camera)))
-    (set! (.. canvas -style -width) (str (:width camera) "px"))
-    (set! (.. canvas -style -height) (str (:height camera) "px"))
-    (dosync (reset! points (:points scene)) (reset! view camera))))
+(defn plan [frames target]
+  {:samples (mapv #(point-map (:nodes %)) frames) :target target})
 
 (defn- replay! [canvas frame-id frames plan finish!]
   (let [started (js/performance.now) samples (:samples plan) count (count samples)]
@@ -47,11 +33,14 @@
                   (reset! frame-id (js/requestAnimationFrame step)))))]
       (reset! frame-id (js/requestAnimationFrame step)))))
 
-(defn mount! [scope canvas points view layout-points framing]
+(defn mount!
+  ([scope canvas points layout-points]
+   (mount! scope canvas points layout-points viewport/clear-points))
+  ([scope canvas points layout-points constrain]
   (let [frame-id (atom nil)
         cancel! (fn [] (when @frame-id (js/cancelAnimationFrame @frame-id)) (reset! frame-id nil))
         finish! (fn [] (cancel!) (.setAttribute canvas "data-layout-phase" "settled")
-                      (scene! canvas points view (framing)))]
+                      (reset! points (constrain @layout-points)))]
     (rx/own! scope cancel!)
     {:active? #(some? @frame-id)
      :finish! finish!
@@ -63,8 +52,8 @@
                 (.setAttribute canvas "data-layout-samples" (str (count frames)))
                 (.setAttribute canvas "data-layout-iteration" (str (:iterationsUsed result 0)))
                 (if (and animate? (seq (:nodes result)) (> (count frames) 1) (not reduced?))
-                  (let [trajectory (plan frames (framing))
-                        render! #(scene! canvas points view {:points % :view (:view trajectory)})]
+                  (let [trajectory (plan frames @layout-points)
+                        render! #(reset! points (constrain %))]
                     (render! (first (:samples trajectory)))
                     (replay! canvas frame-id frames (assoc trajectory :render! render!) finish!))
-                  (finish!))))}))
+                  (finish!))))})))
