@@ -1,0 +1,58 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Topology layout regression</title>
+<link rel="stylesheet" href="http://127.0.0.1:4782/style.css">
+<style>
+  body { overflow: auto; height: auto; padding: 16px; }
+  .fixture { height: 320px; width: 640px; border: 1px solid; margin-bottom: 16px; }
+</style>
+<h1>Topology layout regression</h1>
+<p>Start the editor on port 4782, then open this file in a browser. Tests use its production stylesheet and real browser layout.</p>
+<pre id="results" role="status">Running…</pre>
+<script>
+  // Exercise the wrapper boundaries used by outputs, fullscreen and value-view.
+  // Node-based DOM mocks cannot detect a flex child whose viewport collapses.
+  const results = [];
+  for (const nested of [false, true]) {
+    const fixture = document.createElement('div');
+    fixture.className = 'fixture';
+    fixture.innerHTML = `
+      <div class="topology-fullscreen-shell">
+        <div class="topology-fullscreen-toolbar"><button>Full screen</button></div>
+        <div class="topology-content topology-fullscreen-content">
+          ${nested ? '<button>Back to enclosing scope</button>' : ''}
+          <div class="semantic-scope-body">
+            <div class="value-view-composition">
+              <details class="options value-fold-menu"><summary>Value view</summary></details>
+              <div class="value-view-canvas">
+                <div class="graph-wrap">
+                  <span class="layout-status">Ready</span>
+                  <div class="semantic-summary">1 node</div>
+                  <div class="graph-scroller">
+                    <svg class="graph-svg" width="640" height="330" viewBox="0 0 640 330">
+                      <rect x="12" y="12" width="100" height="40" fill="white"/>
+                    </svg>
+                  </div>
+                  <div class="graph-detail"></div>
+                  <div class="layout-controls"><button>Refine layout</button></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>`;
+    document.body.appendChild(fixture);
+    const scroller = fixture.querySelector('.graph-scroller');
+    const viewport = scroller.getBoundingClientRect();
+    const node = fixture.querySelector('rect').getBoundingClientRect();
+    const stylesheetLoaded = getComputedStyle(fixture.querySelector('.topology-fullscreen-shell')).display === 'flex';
+    const visible = stylesheetLoaded && viewport.height > 100 && viewport.width > 100
+      && viewport.bottom <= fixture.getBoundingClientRect().bottom
+      && node.top >= viewport.top && node.bottom <= viewport.bottom;
+    results.push(`${visible ? 'PASS' : 'FAIL'} ${nested ? 'nested' : 'root'} scope: viewport ${viewport.width} × ${viewport.height}`);
+    if (!visible) {
+      document.documentElement.dataset.failed = 'true';
+    }
+  }
+  document.getElementById('results').textContent = results.join('\n');
+</script>

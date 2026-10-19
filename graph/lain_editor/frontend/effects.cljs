@@ -105,6 +105,17 @@
                               (reset! s/message "Block closed · remaining sessions preserved")
                               (dom/focus-pane! @s/selected-id)))))))
 
+(defn reopen-closed-block! [archive-id]
+  (when-not @s/busy?
+    (let [fresh-id (str (random-uuid))
+          desktop-id (:activeDesktop @s/workspace)
+          next-document (model/reopen-closed-block @s/workspace archive-id desktop-id fresh-id)]
+      (dosync
+       (reset! s/workspace next-document)
+       (s/select-pane! fresh-id))
+      (reset! s/message "Closed block reopened · not run")
+      (dom/focus-pane! fresh-id))))
+
 (defn load-file! [id file]
   (when file
     (-> (.text file)
@@ -160,7 +171,7 @@
                       (reset! s/message (str "Block saved to " (:path result)))
                       result))))))))
 
-(defn perform! [{:keys [action target enabled]}]
+(defn perform! [{:keys [action target archive enabled]}]
   (when enabled
     (case action
       :new-workspace (restore! (model/initial-workspace) {:workspace-path nil})
@@ -175,6 +186,7 @@
       :split-column (add-pane! target "column")
       :spawn (add-pane! target nil)
       :close (close-pane! target)
+      :reopen-closed (reopen-closed-block! archive)
       (:value :cell :graph) (s/set-display! target :mode (name action))
       (:upstream :downstream :both) (s/set-display! target :direction (name action))
       :layer-settings (set! (.-open (.querySelector (dom/pane-root target) ".layer-panel")) true)

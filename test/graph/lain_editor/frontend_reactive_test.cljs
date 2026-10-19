@@ -49,6 +49,30 @@
     (swap! document assoc-in (conj (desktops/layout-path @document) :ratio) 0.7)
     (is (= 2 @seen)) (rx/dispose! scope)))
 
+(deftest failed-runtime-close-leaves-the-active-draft-and-archive-unchanged
+  (async done
+    (let [original-workspace @state/workspace
+          original-selected @state/selected-id
+          initial (model/initial-workspace)
+          id (:id (first (:panes initial)))
+          document (-> initial
+                       (model/update-pane id assoc :source "unsaved draft")
+                       (model/split-pane id "row" (model/new-pane "other")))]
+      (dosync (reset! state/workspace document) (reset! state/selected-id id))
+      (with-redefs [effects/api! (fn [_] (js/Promise.reject (js/Error. "close failed")))]
+        (-> (effects/close-pane! id)
+            (.then (fn [_]
+                     (is (= document @state/workspace))
+                     (is (empty? (get @state/workspace :closedBlocks [])))
+                     (dosync (reset! state/workspace original-workspace)
+                             (reset! state/selected-id original-selected))
+                     (done)))
+            (.catch (fn [error]
+                      (is false (.-message error))
+                      (dosync (reset! state/workspace original-workspace)
+                              (reset! state/selected-id original-selected))
+                      (done))))))))
+
 (deftest label-sized-nodes-adapt-density-without-automatic-scaling
   (is (= [44 52] (viewport/node-size {:label "x"})))
   (is (= 72 (second (viewport/node-size {:label "a very long semantic name"}))))

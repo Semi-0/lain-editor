@@ -4,6 +4,7 @@
             [graph.lain-editor.frontend.desktop-bar :as desktop-bar]
             [graph.lain-editor.frontend.effects :as effects]
             [graph.lain-editor.frontend.layout :as layout]
+            [graph.lain-editor.frontend.model :as model]
             [graph.lain-editor.frontend.palette :as palette]
             [graph.lain-editor.frontend.reactive :as rx]
             [graph.lain-editor.frontend.remote-files :as remote-files]
@@ -47,7 +48,8 @@
                      :else nil)))))
 
 (defn- workspace-controls! [scope]
-  (let [file (.getElementById js/document "open") menu (.querySelector js/document ".workspace-options")]
+  (let [file (.getElementById js/document "open") menu (.querySelector js/document ".workspace-options")
+        closed (.getElementById js/document "closed-blocks")]
     (dom/listen! scope (.getElementById js/document "commands") "click" (fn [_] (palette/open!)))
     (dom/listen! scope (.getElementById js/document "save") "click"
                  (fn [_] (effects/save-workspace!) (set! (.-open menu) false)))
@@ -65,6 +67,17 @@
     (dom/listen! scope (.getElementById js/document "open-label") "keydown"
                  (fn [event]
                    (when (contains? #{"Enter" " "} (.-key event)) (.preventDefault event) (.click file))))
+    (rx/watch! scope (rx/derive! scope #(get % :closedBlocks []) s/workspace)
+               (fn [entries]
+                 (dom/replace! closed)
+                 (when (seq entries)
+                   (dom/append! closed (dom/element "div" "palette-heading" "Reopen closed block"))
+                   (doseq [entry (reverse entries)]
+                     (dom/append!
+                      closed
+                      (dom/button (model/closed-block-label entry)
+                                  #(do (effects/reopen-closed-block! (:id entry))
+                                       (set! (.-open menu) false))))))))
     (rx/watch! scope s/busy?
                (fn [busy?]
                  (doseq [control (array-seq (.querySelectorAll js/document ".workspace-actions button, .workspace-actions input"))]

@@ -20,8 +20,8 @@
                   (every? string? (:extensionEdits pane))
                   (= (count (:extensions pane)) (count (:extensionEdits pane))))
              "Extension drafts must match the saved extension count"))
-  (ensure! (or (some? (:executedSource pane)) (empty? (:extensions pane)))
-           "Extensions require an executed source")
+  ;; Reopened blocks retain their extension sequence but are deliberately Not run.
+  ;; The sequence is replayed only by an explicit Run command.
   (let [{:keys [cell mode direction]} (:display pane)]
     (ensure! (string? cell) "Display cell must be a binding name")
     (ensure! (contains? #{"value" "cell" "graph"} mode) "Unknown display mode")
@@ -32,6 +32,22 @@
   (when (contains? pane :layerMode)
     (ensure! (contains? #{"overlay" "stack"} (:layerMode pane)) "Unknown layer composition"))
   pane)
+
+(def archive-capacity 64)
+
+(defn validate-closed-block [entry]
+  (ensure! (map? entry) "Closed block must be an object")
+  (ensure! (and (string? (:id entry)) (not (str/blank? (:id entry))))
+           "Closed block needs an id")
+  (ensure! (and (integer? (:order entry)) (not (neg? (:order entry))))
+           "Closed block needs a non-negative close order")
+  (ensure! (map? (:pane entry)) "Closed block needs a pane descriptor")
+  (validate-pane (:pane entry))
+  (ensure! (not (contains? (:pane entry) :session)) "Closed blocks cannot contain sessions")
+  (ensure! (not (contains? (:pane entry) :generation)) "Closed blocks cannot contain generations")
+  (ensure! (not (contains? (:pane entry) :clock)) "Closed blocks cannot contain clocks")
+  (ensure! (not (contains? (:pane entry) :capability)) "Closed blocks cannot contain capabilities")
+  entry)
 
 (defn layout-ids [layout depth]
   (ensure! (< depth 20) "Split tree is too deep")
@@ -57,7 +73,22 @@
   (ensure! (and (vector? (:panes document)) (<= 1 (count (:panes document)) 64))
            "Workspace needs between 1 and 64 panes")
   (doseq [pane (:panes document)] (validate-pane pane))
-  (let [desktops (desktop-layouts document)
+  (let [closed-blocks (get document :closedBlocks [])
+        _ (ensure! (and (vector? closed-blocks) (<= (count closed-blocks) archive-capacity))
+                   "closedBlocks must be an array with at most 64 entries")
+        _ (doseq [entry closed-blocks] (validate-closed-block entry))
+        archive-ids (mapv :id closed-blocks)
+        archive-orders (mapv :order closed-blocks)
+        _ (ensure! (= (count archive-ids) (count (set archive-ids)))
+                   "Duplicate closed block ID")
+        _ (ensure! (= (count archive-orders) (count (set archive-orders)))
+                   "Duplicate closed block order")
+        next-order (get document :nextClosedBlockOrder
+                        (inc (reduce max -1 archive-orders)))
+        _ (ensure! (and (integer? next-order)
+                        (>= next-order (inc (reduce max -1 archive-orders))))
+                   "nextClosedBlockOrder must follow archived close orders")
+        desktops (desktop-layouts document)
         desktop-ids (mapv :id desktops)
         ids (mapv :id (:panes document))
         leaves (vec (mapcat #(layout-ids (:layout %) 0) desktops))]
@@ -82,6 +113,10 @@
                                                         :desktops (desktop-layouts document)))
                    2 document
                    (throw (ex-info "Unsupported workspace version" {})))]
-    (update document :panes #(mapv (fn [pane]
-                                    (assoc pane :layers (layers/for-pane pane)
-                                           :layerMode (get pane :layerMode "overlay"))) %))))
+    (-> document
+        (update :panes #(mapv (fn [pane]
+                                (assoc pane :layers (layers/for-pane pane)
+                                       :layerMode (get pane :layerMode "overlay"))) %))
+        (update :closedBlocks #(vec (or % [])))
+        (update :nextClosedBlockOrder
+                #(or % (inc (reduce max -1 (map :order (get document :closedBlocks [])))))))))

@@ -66,13 +66,66 @@
                 :else (assoc tree :first a :second b)))
     (throw (ex-info "Unknown layout node" {:node tree}))))
 
-(defn close-pane [document id]
-  (workspace/ensure! (> (count (desktops/pane-ids document)) 1) "Keep at least one pane per desktop")
-  (workspace/ensure! (some #{id} (desktops/pane-ids document)) "Unknown pane in this desktop")
-  (-> document
-      (update :panes #(filterv (fn [p] (not= id (:id p))) %))
-      (update-in (desktops/layout-path document) remove-leaf id)
-      (#(desktops/select-pane % (first (desktops/pane-ids %))))))
+(defn- next-close-order [document]
+  (get document :nextClosedBlockOrder
+       (inc (reduce max -1 (map :order (get document :closedBlocks []))))))
+
+(defn archive-entry
+  "Portable source-only record. Runtime capabilities are intentionally excluded."
+  [document id archive-id]
+  (let [p (pane document id)]
+    (workspace/ensure! p "Unknown pane")
+    {:id archive-id :order (next-close-order document)
+     :pane (select-keys p [:id :title :filename :source :executedSource
+                           :extensions :extensionEdits :extensionDraft
+                           :outputRatio :layerMode :layers :display])}))
+
+(defn close-pane
+  ([document id] (close-pane document id (str (random-uuid))))
+  ([document id archive-id]
+   (workspace/ensure! (> (count (desktops/pane-ids document)) 1) "Keep at least one pane per desktop")
+   (workspace/ensure! (some #{id} (desktops/pane-ids document)) "Unknown pane in this desktop")
+   (workspace/ensure! (< (count (get document :closedBlocks [])) workspace/archive-capacity)
+                      "Closed block archive has reached its 64-entry capacity")
+   (workspace/ensure! (not-any? #(= archive-id (:id %)) (get document :closedBlocks []))
+                      "Duplicate closed block id")
+   (let [entry (archive-entry document id archive-id)]
+     (-> document
+         (update :closedBlocks (fnil conj []) entry)
+         (assoc :nextClosedBlockOrder (inc (:order entry)))
+         (update :panes #(filterv (fn [p] (not= id (:id p))) %))
+         (update-in (desktops/layout-path document) remove-leaf id)
+         (#(desktops/select-pane % (first (desktops/pane-ids %))))))))
+
+(defn closed-block [document id]
+  (some #(when (= id (:id %)) %) (get document :closedBlocks [])))
+
+(defn closed-block-label [{:keys [order pane]}]
+  (let [name (or (not-empty (:title pane)) (not-empty (:filename pane)) "Untitled block")]
+    (str "Reopen closed block: " name " (#" (inc order) ")")))
+
+(defn reopen-closed-block
+  "Consume an archive into the active desktop using a fresh pane identity.
+  A repeated acknowledged delivery is idempotent when that fresh pane exists."
+  [document archive-id desktop-id fresh-id]
+  (if (pane document fresh-id)
+    document
+    (let [entry (closed-block document archive-id)]
+      (workspace/ensure! entry "Unknown closed block")
+      (workspace/ensure! (= desktop-id (if (= 1 (:version document))
+                                         "desktop-1"
+                                         (:activeDesktop document)))
+                         "Active desktop changed before reopen; submit again")
+      (workspace/ensure! (< (count (:panes document)) 64) "Workspace has 64 panes")
+      (let [archived (:pane entry)
+            fresh (-> archived
+                      (assoc :id fresh-id :executedSource nil)
+                      (cond-> (some? (:executedSource archived))
+                        (assoc :previousExecutedSource (:executedSource archived))))]
+        (-> document
+            (spawn-pane fresh)
+            (update :closedBlocks
+                    #(filterv (fn [candidate] (not= archive-id (:id candidate))) %)))))))
 
 (defn layout-shape [tree]
   (case (:type tree)
@@ -137,16 +190,24 @@
 
 (defn commands [document id generations busy?]
   (let [p (pane document id)]
-    (mapv (fn [[action label]]
-            {:action action :label label :target id
-             :enabled (and (not busy?) (some? p)
-                           (case action
-                             :close (> (count (desktops/pane-ids document)) 1)
-                             :extend (and (contains? generations id)
-                                          (not (extensions-edited? p))
-                                          (not (str/blank? (:extensionDraft p))))
-                             true))})
-          command-specs)))
+    (into
+     (mapv (fn [[action label]]
+             {:action action :label label :target id
+              :enabled (and (not busy?) (some? p)
+                            (case action
+                              :close (and (> (count (desktops/pane-ids document)) 1)
+                                          (< (count (get document :closedBlocks []))
+                                             workspace/archive-capacity))
+                              :extend (and (contains? generations id)
+                                           (not (extensions-edited? p))
+                                           (not (str/blank? (:extensionDraft p))))
+                              true))})
+           command-specs)
+     (map (fn [entry]
+            {:action :reopen-closed :archive (:id entry) :target id
+             :label (closed-block-label entry)
+             :enabled (and (not busy?) (< (count (:panes document)) 64))})
+          (reverse (get document :closedBlocks []))))))
 
 (defn desktop-commands [document busy?]
   (into [{:action :new-desktop :label "New desktop" :enabled (and (not busy?) (< (count (:panes document)) 64))}]

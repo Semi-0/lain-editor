@@ -19,6 +19,53 @@
     (is (thrown? #?(:clj Exception :cljs js/Error) (model/split-pane split "missing" "row" (model/new-pane "d"))))
     (is (thrown? #?(:clj Exception :cljs js/Error) (model/split-pane split "a" "row" (model/new-pane "b"))))))
 
+(deftest closed-blocks-preserve-editable-source-and-reopen-not-run
+  (let [original (assoc (model/new-pane "a")
+                        :title "Working draft" :filename "draft.lain"
+                        :source "draft source" :executedSource "last run"
+                        :extensions ["old extension"]
+                        :extensionEdits ["edited extension"]
+                        :extensionDraft "pending extension"
+                        :outputRatio 0.61 :layerMode "stack")
+        split (-> (document)
+                  (assoc-in [:panes 0] original)
+                  (model/split-pane "a" "row" (model/new-pane "b")))
+        closed (model/close-pane split "a" "archive-a")
+        entry (model/closed-block closed "archive-a")
+        reopened (model/reopen-closed-block closed "archive-a" "desktop-1" "fresh-a")
+        fresh (model/pane reopened "fresh-a")
+        closed-again (model/close-pane reopened "fresh-a" "archive-b")]
+    (is (= original (:pane entry)) "the portable pane descriptor is archived exactly")
+    (is (= closed (workspace/validate closed)))
+    (is (nil? (:executedSource fresh)) "reopen never represents a live execution")
+    (is (= "last run" (:previousExecutedSource fresh)))
+    (is (= (select-keys original [:title :filename :source :extensions :extensionEdits
+                                  :extensionDraft :outputRatio :layerMode :layers :display])
+           (select-keys fresh [:title :filename :source :extensions :extensionEdits
+                               :extensionDraft :outputRatio :layerMode :layers :display])))
+    (is (nil? (model/closed-block reopened "archive-a")))
+    (is (= reopened
+           (model/reopen-closed-block reopened "archive-a" "desktop-1" "fresh-a"))
+        "redelivery with the assigned pane id is idempotent")
+    (is (= 1 (:order (model/closed-block closed-again "archive-b")))
+        "close order remains monotone after consuming the newest archive")
+    (is (= reopened (workspace/validate reopened)))))
+
+(deftest closed-block-boundaries-reject-loss-and-invalid-reopen
+  (let [split (model/split-pane (document) "a" "row" (model/new-pane "b"))
+        full (assoc split :closedBlocks
+                    (mapv (fn [index]
+                            {:id (str "archive-" index) :order index
+                             :pane (model/new-pane (str "old-" index))})
+                          (range workspace/archive-capacity)))]
+    (is (thrown-with-msg? #?(:clj Exception :cljs js/Error) #"capacity"
+                          (model/close-pane full "a" "overflow")))
+    (is (thrown? #?(:clj Exception :cljs js/Error)
+                 (model/reopen-closed-block split "missing" "desktop-1" "fresh")))
+    (is (thrown? #?(:clj Exception :cljs js/Error)
+                 (workspace/validate (assoc split :closedBlocks [{:id "bad" :order 0
+                                                                  :pane {:source "incomplete"}}]))))))
+
 (deftest document-preserves-drafts-and-successful-history
   (let [doc (model/update-pane (document) "a" assoc :source "draft" :executedSource "(define result 1)"
                                 :extensions ["(define next (+ result 1))"] :extensionDraft "future")]
