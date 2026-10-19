@@ -325,8 +325,19 @@
     (is (= 12 (:font-size subtitle)))
     (is (> (:font-size content) (:font-size subtitle)))
     (is (= (second (viewport/node-size large)) (second (viewport/node-size small)))))
-  (is (= 19.2 (viewport/text-width "ß" :content)))
+  (is (= 9.6 (viewport/text-width "ß" :content)))
+  (is (= 19.2 (viewport/text-width "ß" :name)))
   (is (< (abs (- 7.2 (viewport/text-width "ß" :subtitle))) 0.001)))
+
+(deftest cell-string-content-preserves-case-and-literal-punctuation
+  (let [text "\"Hello MiXeD ß :keep-case\""
+        node {:kind "cell" :label "message"
+              :valueGrid [{:key "base" :value text :depth 0}]}
+        content (filter #(= :content (:role %)) (viewport/text-rows node))]
+    (is (= text (apply str (map :text content))))
+    (is (= "message" (viewport/node-caption node)))
+    (is (= (* 0.6 16 (count "\"MiXeD ß\""))
+           (viewport/text-width "\"MiXeD ß\"" :content)))))
 
 (deftest linked-list-boxes-wrap-and-preserve-all-elements
   (let [items (mapv (fn [n] [{:key "" :value (str n) :depth 0}]) (range 40))

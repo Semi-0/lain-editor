@@ -49,7 +49,7 @@
   ([text] (text-width text :content))
   ([text role]
    (let [visible (str/replace text reference-pattern "○")
-         displayed (if (= role :subtitle) visible (str/upper-case visible))]
+         displayed (if (= role :name) (str/upper-case visible) visible)]
      (* 0.6 (get font-sizes role) (count displayed)))))
 
 (defn- section-data [node]

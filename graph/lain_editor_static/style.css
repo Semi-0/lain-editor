@@ -218,8 +218,10 @@ footer { height: 31px; flex: none; display: flex; align-items: center; gap: 8px;
 .value-section > div { max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; }
 .grid-key, .graph-node .node-subtitle { color: #eee; fill: #eee; font-size: 12px; text-transform: none; }
 .grid-value, .grid-title, .graph-node .node-name, .graph-node .node-content {
-  color: #eee; fill: #eee; font-size: 16px; text-transform: uppercase;
+  color: #eee; fill: #eee; font-size: 16px;
 }
+.grid-value, .graph-node .node-content { text-transform: none; }
+.grid-title, .graph-node .node-name { text-transform: uppercase; }
 .grid-title { padding: 16px 16px 0; font-family: inherit; font-weight: 400; text-align: center; }
 .grid-title + .value-grid { padding-top: 12px; }
 .source-symbol { display: inline-block; vertical-align: middle; margin-right: 5px; }
