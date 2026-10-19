@@ -153,6 +153,9 @@ footer { height: 31px; flex: none; display: flex; align-items: center; gap: 8px;
   top: var(--layer-top); pointer-events: auto; background: var(--background); overflow: hidden; }
 .layer-cell > .cell-view { height: 100%; overflow: auto; }
 .topology-content { width: 100%; height: 100%; min-height: 0; overflow: hidden; }
+/* Scope navigation must reserve a definite graph height through the value wrapper. */
+.topology-fullscreen-content { display: flex; flex-direction: column; }
+.semantic-scope-body { flex: 1; min-height: 0; }
 .layer-stage.stack { display: flex; flex-direction: column; }
 .layer-stage.stack > .layer-code { flex: 0 1 auto; max-height: 46%; display: flex; flex-direction: column; }
 .layer-stage.stack > .layer-result { flex: none; }
@@ -239,7 +242,8 @@ footer { height: 31px; flex: none; display: flex; align-items: center; gap: 8px;
 .node-value-section:last-child { margin-bottom: 0; }
 
 .value-view-composition { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-.value-view-canvas { flex: 1; min-height: 0; }
+.value-view-canvas { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.value-view-canvas > .graph-wrap { flex: 1; height: auto; }
 .value-fold-menu { position: relative; align-self: flex-start; margin: 4px 8px; z-index: 5; }
 .value-fold-popup { top: 100%; bottom: auto; left: 0; right: auto; width: min(420px, 75vw); }
 .value-fold-popup select { display: block; width: 100%; margin: 8px 0; }
