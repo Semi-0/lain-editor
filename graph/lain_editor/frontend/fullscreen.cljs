@@ -3,9 +3,8 @@
   (:require [graph.lain-editor.frontend.dom :as dom]
             [graph.lain-editor.frontend.reactive :as rx]))
 
-(defn mount!
-  ([scope host] (mount! scope host js/document))
-  ([scope host document]
+(defn shell!
+  [scope host document {:keys [label on-change] :or {label "topology"}}]
    (let [root (dom/element "div" "topology-fullscreen-shell")
          toolbar (dom/element "div" "topology-fullscreen-toolbar")
          body (dom/element "div" "topology-content topology-fullscreen-content")
@@ -33,9 +32,10 @@
          sync! (fn [_]
                  (dom/text! button (if (active?) "Exit full screen" "Full screen"))
                  (.setAttribute button "aria-label"
-                                (if (active?) "Exit fullscreen topology" "Enter fullscreen topology"))
-                 (.setAttribute button "aria-pressed" (str (active?))))]
-     (.setAttribute button "title" "Expand topology and timeline; Escape exits fullscreen.")
+                                (str (if (active?) "Exit fullscreen " "Enter fullscreen ") label))
+                 (.setAttribute button "aria-pressed" (str (active?)))
+                 (when on-change (on-change (active?))))]
+     (.setAttribute button "title" (str "Expand " label "; Escape exits fullscreen."))
      (.setAttribute status "role" "status")
      (dom/append! toolbar button status)
      (dom/append! root toolbar body)
@@ -44,4 +44,8 @@
      (dom/listen! scope document "webkitfullscreenchange" sync!)
      (sync! nil)
      (rx/own! scope #(do (reset! alive? false) (when (active?) (leave!))))
-     body)))
+     {:body body :toolbar toolbar :root root}))
+
+(defn mount!
+  ([scope host] (mount! scope host js/document))
+  ([scope host document] (:body (shell! scope host document {}))))

@@ -109,7 +109,7 @@
   (when file
     (-> (.text file)
         (.then (fn [source]
-                 (s/change-pane! id assoc :source source :filename (.-name file) :title (.-name file))
+                 (s/change-pane! id model/loaded-source (.-name file) source)
                  (reset! s/message "File loaded · ⌘Enter / Ctrl+Enter runs the selected block")))
         (.catch #(reset! s/message (.-message %))))))
 

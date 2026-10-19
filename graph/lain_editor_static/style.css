@@ -260,6 +260,13 @@ footer { height: 31px; flex: none; display: flex; align-items: center; gap: 8px;
 .topology-fullscreen-shell:fullscreen { width: 100vw; height: 100vh; padding: 8px; box-sizing: border-box; }
 .topology-fullscreen-shell:-webkit-full-screen { width: 100vw; height: 100vh; padding: 8px; box-sizing: border-box; }
 .fullscreen-status { font-size: 11px; }
+.block-display { display: flex; flex: 1 1 0; min-height: 0; min-width: 0; }
+.block-display > .topology-fullscreen-shell > .topology-fullscreen-content { display: flex; flex-direction: column; }
+.block-display .topology-fullscreen-toolbar { flex-wrap: wrap; }
+.block-display .layer-topology > .topology-content { display: flex; flex-direction: column; }
+.block-display .layer-topology > .topology-content > .graph-wrap { flex: 1 1 0; height: auto; }
+.block-display-fill .layer-stage.stack > .layer-result { flex: 1 1 auto; overflow: auto; }
+.block-display-hidden .layer-stage > .layer-code { max-height: 100%; height: 100%; flex: 1 1 auto; }
 .source-save { width: min(520px, calc(100vw - 32px)); color: #e5e5e5; background: var(--background); border: 1px solid var(--line); padding: 20px; }
 .source-save::backdrop { background: #0009; }
 .source-save h2 { font-size: 16px; margin: 0 0 16px; }

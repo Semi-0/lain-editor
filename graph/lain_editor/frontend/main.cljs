@@ -6,6 +6,7 @@
             [graph.lain-editor.frontend.layout :as layout]
             [graph.lain-editor.frontend.palette :as palette]
             [graph.lain-editor.frontend.reactive :as rx]
+            [graph.lain-editor.frontend.remote-files :as remote-files]
             [graph.lain-editor.frontend.state :as s]))
 
 (defonce application (rx/scope))
@@ -97,6 +98,7 @@
   (let [timer (js/setInterval #(when (and (not @s/busy?) (not (.-hidden js/document))) (swap! s/tick inc)) 2000)]
     (rx/own! application #(js/clearInterval timer)))
   (dom/listen! application js/window "beforeunload" (fn [_] (rx/dispose! application)))
-  (storage! application))
+  (storage! application)
+  (remote-files/attach! application))
 
 (init!)

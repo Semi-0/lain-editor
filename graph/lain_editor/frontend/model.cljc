@@ -26,6 +26,9 @@
   (update document :panes
           #(mapv (fn [p] (if (= id (:id p)) (apply f p args) p)) %)))
 
+(defn loaded-source [pane filename source]
+  (assoc pane :source source :filename filename :title filename))
+
 (defn replace-leaf [tree id replacement]
   (case (:type tree)
     "pane" (if (= id (:id tree)) replacement tree)

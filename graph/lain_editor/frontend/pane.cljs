@@ -4,7 +4,7 @@
             [graph.lain-editor.layers :as layers]
             [graph.lain-editor.frontend.dom :as dom]
             [graph.lain-editor.frontend.effects :as effects]
-            [graph.lain-editor.frontend.fullscreen :as fullscreen]
+            [graph.lain-editor.frontend.block-display :as block-display]
             [graph.lain-editor.frontend.extension-editors :as extension-editors]
             [graph.lain-editor.frontend.composition :as composition]
             [graph.lain-editor.frontend.layer-panel :as layer-panel]
@@ -56,7 +56,9 @@
         filename (dom/element "span") code (dom/element "textarea" "code")
         file (dom/element "input") status (dom/element "span" "state") statebar (dom/element "div" "statebar")
         value (dom/element "pre" "value-view") cell (dom/element "pre" "cell-view")
-        topology (dom/element "div" "display-body topology-content") footer (dom/element "div" "pane-tools")]
+        topology (dom/element "div" "display-body topology-content") footer (dom/element "div" "pane-tools")
+        presentation-host (dom/element "div" "block-display")
+        presentation (block-display/mount! scope presentation-host descriptor)]
     (set! (.. root -dataset -paneId) id) (set! (.-tabIndex root) 0)
     (.setAttribute root "aria-label" (str "Editor " (inc index)))
     (.setAttribute code "aria-label" (str "Lain code " (inc index))) (set! (.-spellcheck code) false)
@@ -75,11 +77,12 @@
     (dom/append! (get planes "code") source)
     (dom/append! (get planes "result") value) (dom/append! (get planes "cell") cell)
     (dom/append! (get planes "topology") topology)
-    (dom/append! root area footer)
+    (dom/append! (:body presentation) area)
+    (dom/append! root presentation-host footer)
     (dom/append! footer (extension-view scope id descriptor) (layer-panel/mount! scope id descriptor))
     (bind-source! scope id descriptor code file meta filename status)
-    (composition/attach! scope area descriptor planes value)
+    (composition/attach! scope area (:descriptor presentation) planes value)
     (outputs/attach! scope id descriptor request
-                     {"result" value "cell" cell "topology" (fullscreen/mount! scope topology)})
+                     {"result" value "cell" cell "topology" topology})
     (inspection/attach! scope id request)
     root))
