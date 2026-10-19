@@ -33,6 +33,8 @@
     (is (= :split-row (:action (first (model/matching-commands commands " SIDE split ")))))
     (is (false? (:enabled (first (model/matching-commands commands "close")))))
     (is (false? (:enabled (first (model/matching-commands commands "apply")))))
+    (is (= [:save :save-as]
+           (mapv :action (model/matching-commands commands "save workspace"))))
     (is (empty? (model/matching-commands commands "missing")))
     (is (every? (complement :enabled) (model/commands (document) "a" {} true)))))
 

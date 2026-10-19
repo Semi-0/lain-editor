@@ -129,7 +129,8 @@
    [:upstream "Trace upstream"] [:downstream "Trace downstream"] [:both "Trace both directions"]
    [:layer-settings "Edit display layers"] [:fit-graph "Compact topology"] [:root-graph "Return to root topology"]
    [:refresh "Refresh output"] [:edit-extension "Edit extension code"] [:extend "Apply extension"]
-   [:new-workspace "New workspace"] [:save "Save workspace JSON"] [:open "Open workspace JSON…"]])
+   [:new-workspace "New workspace"] [:save "Save workspace"]
+   [:save-as "Save workspace as…"] [:open "Open workspace JSON…"]])
 
 (defn commands [document id generations busy?]
   (let [p (pane document id)]

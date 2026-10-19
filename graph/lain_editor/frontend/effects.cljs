@@ -11,6 +11,7 @@
             [graph.lain-editor.layers :as layers]))
 
 (def storage-key "lain-tiled-editor-v1")
+(def workspace-path-storage-key "lain-tiled-editor-workspace-path-v1")
 
 (defn api!
   ([command] (api! command nil))
@@ -59,23 +60,27 @@
                     (swap! s/generations assoc id (:generation result))
                     (reset! s/message "Runtime updated · each block has an independent session"))))))))
 
-(defn restore! [input]
-  (let [document (workspace/upgrade input)]
-  (operation!
-   nil
-   #(do
-      (reset! s/message "Rebuilding saved programs…")
-      (-> (api! {:op "restore" :workspace document})
-          (.then (fn [result]
-                   (dosync
-                    (reset! s/results {}) (reset! s/errors {}) (reset! s/expansions {})
-                    (reset! s/workspace
-                            (reduce (fn [doc [id mode]]
-                                      (model/update-pane doc (name id) layers/program-output mode))
-                                    document (:displayModes result)))
-                    (reset! s/selected-id (desktops/selected-id document))
-                    (reset! s/generations (into {} (map (fn [[k v]] [(name k) v])) (:generations result)))
-                    (reset! s/message "Workspace restored · programs replayed in isolated sessions")))))))))
+(defn restore!
+  ([input] (restore! input {}))
+  ([input options]
+   (let [document (workspace/upgrade input)]
+     (operation!
+      nil
+      #(do
+         (reset! s/message "Rebuilding saved programs…")
+         (-> (api! {:op "restore" :workspace document})
+             (.then (fn [result]
+                      (dosync
+                       (reset! s/results {}) (reset! s/errors {}) (reset! s/expansions {})
+                       (reset! s/workspace
+                               (reduce (fn [doc [id mode]]
+                                         (model/update-pane doc (name id) layers/program-output mode))
+                                       document (:displayModes result)))
+                       (reset! s/selected-id (desktops/selected-id document))
+                       (when (contains? options :workspace-path)
+                         (reset! s/workspace-path (:workspace-path options)))
+                       (reset! s/generations (into {} (map (fn [[k v]] [(name k) v])) (:generations result)))
+                       (reset! s/message "Workspace restored · programs replayed in isolated sessions"))))))))))
 
 (defn add-pane! [id axis]
   (when-not @s/busy?
@@ -108,21 +113,41 @@
                  (reset! s/message "File loaded · ⌘Enter / Ctrl+Enter runs the selected block")))
         (.catch #(reset! s/message (.-message %))))))
 
-(defn save! []
-  (let [blob (js/Blob. #js [(js/JSON.stringify (clj->js @s/workspace) nil 2)]
-                       #js {:type "application/json"})
-        url (.createObjectURL js/URL blob)
-        link (dom/element "a")]
-    (set! (.-href link) url) (set! (.-download link) "lain-workspace.json")
-    (.click link)
-    (js/setTimeout #(.revokeObjectURL js/URL url) 1000)
-    (reset! s/message "Workspace JSON saved")))
+(defn- save-workspace-to! [path replace?]
+  (-> (api! {:op "save-workspace" :path path :replace replace? :workspace @s/workspace})
+      (.then (fn [result]
+               (reset! s/workspace-path (:path result))
+               (reset! s/message (str "Workspace saved to " (:path result)))
+               result))))
+
+(defn save-workspace-as! []
+  (when-not @s/busy?
+    (source-save/open!
+     (or @s/workspace-path "lain-workspace.json")
+     save-workspace-to!
+     js/document
+     {:aria-label "Save workspace as"
+      :title "Save workspace as"
+      :description "Choose a project-relative JSON path. This becomes the target for Save workspace."})))
+
+(defn save-workspace! []
+  (if-let [path @s/workspace-path]
+    (operation! nil #(save-workspace-to! path true))
+    (save-workspace-as!)))
 
 (defn persist! [document]
   (try
     (.setItem js/localStorage storage-key (js/JSON.stringify (clj->js document)))
     (catch :default error
       (reset! s/message (str "Local draft storage: " (.-message error) ". Save JSON to keep your work.")))))
+
+(defn persist-workspace-path! [path]
+  (try
+    (if path
+      (.setItem js/localStorage workspace-path-storage-key path)
+      (.removeItem js/localStorage workspace-path-storage-key))
+    (catch :default error
+      (reset! s/message (str "Workspace path storage: " (.-message error))))))
 
 (defn save-block! [id]
   (when-not @s/busy?
@@ -138,7 +163,7 @@
 (defn perform! [{:keys [action target enabled]}]
   (when enabled
     (case action
-      :new-workspace (restore! (model/initial-workspace))
+      :new-workspace (restore! (model/initial-workspace) {:workspace-path nil})
       :new-desktop (dosync
                      (swap! s/workspace desktops/add-desktop (str (random-uuid)) (model/new-pane))
                      (reset! s/selected-id (desktops/selected-id @s/workspace)))
@@ -159,6 +184,7 @@
       :edit-extension (let [details (.querySelector (dom/pane-root target) ".extension")]
                         (set! (.-open details) true) (.focus (.querySelector details "textarea")))
       :extend (run! target "extend")
-      :save (save!)
+      :save (save-workspace!)
+      :save-as (save-workspace-as!)
       :open (.click (.getElementById js/document "open"))
       (throw (js/Error. "Unknown palette command")))))

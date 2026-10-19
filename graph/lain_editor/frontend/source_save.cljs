@@ -4,7 +4,11 @@
 
 (defn open!
   ([suggested-path save-file!] (open! suggested-path save-file! js/document))
-  ([suggested-path save-file! document]
+  ([suggested-path save-file! document] (open! suggested-path save-file! document {}))
+  ([suggested-path save-file! document {:keys [aria-label title description]
+                                        :or {aria-label "Save block to file"
+                                             title "Save block to file"
+                                             description "Includes current code, edited extensions and the pending extension draft."}}]
   (let [dialog (dom/element "dialog" "source-save")
         form (dom/element "form") path-label (dom/element "label" "" "Project-relative file path")
         path (dom/element "input") replace-label (dom/element "label" "replace-file")
@@ -12,7 +16,7 @@
         actions (dom/element "div" "source-save-actions")
         save (dom/element "button" "" "Save file") cancel (dom/element "button" "" "Cancel")
         saving? (atom false)]
-    (.setAttribute dialog "aria-label" "Save block to file")
+    (.setAttribute dialog "aria-label" aria-label)
     (.setAttribute path "aria-label" "Project-relative file path")
     (.setAttribute error "role" "alert")
     (set! (.-type path) "text") (set! (.-value path) suggested-path) (set! (.-required path) true)
@@ -21,8 +25,8 @@
     (dom/append! path-label path)
     (dom/append! replace-label replace (dom/element "span" "" "Replace existing file"))
     (dom/append! actions cancel save)
-    (dom/append! form (dom/element "h2" "" "Save block to file") path-label
-                 (dom/element "p" "" "Includes current code, edited extensions and the pending extension draft.")
+    (dom/append! form (dom/element "h2" "" title) path-label
+                 (dom/element "p" "" description)
                  replace-label error actions)
     (dom/append! dialog form) (dom/append! (.-body document) dialog)
     (set! (.-onsubmit form)

@@ -7,6 +7,7 @@
             [graph.lain-editor.frontend.reactive :as rx]))
 
 (defonce workspace (j/cell (model/initial-workspace)))
+(defonce workspace-path (j/cell nil))
 (defonce selected-id (j/cell (:id (first (:panes @workspace)))))
 (defonce busy? (j/cell false))
 (defonce pending-id (j/cell nil))

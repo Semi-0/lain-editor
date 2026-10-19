@@ -49,13 +49,16 @@
   (let [file (.getElementById js/document "open") menu (.querySelector js/document ".workspace-options")]
     (dom/listen! scope (.getElementById js/document "commands") "click" (fn [_] (palette/open!)))
     (dom/listen! scope (.getElementById js/document "save") "click"
-                 (fn [_] (effects/save!) (set! (.-open menu) false)))
+                 (fn [_] (effects/save-workspace!) (set! (.-open menu) false)))
+    (dom/listen! scope (.getElementById js/document "save-as") "click"
+                 (fn [_] (effects/save-workspace-as!) (set! (.-open menu) false)))
     (dom/listen! scope file "change"
                  (fn [_]
                    (set! (.-open menu) false)
                    (when-let [input (aget (.-files file) 0)]
                      (-> (.text input)
-                         (.then #(effects/restore! (js->clj (js/JSON.parse %) :keywordize-keys true)))
+                         (.then #(effects/restore! (js->clj (js/JSON.parse %) :keywordize-keys true)
+                                                   {:workspace-path nil}))
                          (.catch #(reset! s/message (.-message %)))
                          (.finally #(set! (.-value file) ""))))))
     (dom/listen! scope (.getElementById js/document "open-label") "keydown"
@@ -68,11 +71,16 @@
 
 (defn- storage! [scope]
   ;; Read the saved document before subscribing. A failed import cannot overwrite it.
-  (let [saved (.getItem js/localStorage effects/storage-key) key (random-uuid)]
-    (add-watch s/workspace key (fn [_ _ _ document] (effects/persist! document)))
-    (rx/own! scope #(remove-watch s/workspace key))
+  (let [saved (.getItem js/localStorage effects/storage-key)
+        saved-path (.getItem js/localStorage effects/workspace-path-storage-key)
+        workspace-key (random-uuid) path-key (random-uuid)]
+    (add-watch s/workspace workspace-key (fn [_ _ _ document] (effects/persist! document)))
+    (add-watch s/workspace-path path-key (fn [_ _ _ path] (effects/persist-workspace-path! path)))
+    (rx/own! scope #(do (remove-watch s/workspace workspace-key)
+                        (remove-watch s/workspace-path path-key)))
     (if saved
-      (try (effects/restore! (js->clj (js/JSON.parse saved) :keywordize-keys true))
+      (try (effects/restore! (js->clj (js/JSON.parse saved) :keywordize-keys true)
+                             {:workspace-path saved-path})
            (catch :default error (reset! s/message (.-message error))))
       (effects/persist! @s/workspace))))
 
