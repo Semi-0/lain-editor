@@ -39,6 +39,10 @@
                      (do (.preventDefault event) (palette/open!))
                      (and modifier? (= "Enter" key) (not (:open? @s/palette)))
                      (do (.preventDefault event) (effects/run! @s/selected-id "run"))
+                     (and modifier? (= "s" (.toLowerCase key)) (not (:open? @s/palette)))
+                     (do (.preventDefault event)
+                         (when-not (.querySelector js/document "dialog.source-save[open]")
+                           (effects/save-block! @s/selected-id)))
                      :else nil)))))
 
 (defn- workspace-controls! [scope]

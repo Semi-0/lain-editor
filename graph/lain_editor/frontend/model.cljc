@@ -81,6 +81,20 @@
 (defn extension-sources [pane]
   (get pane :extensionEdits (:extensions pane)))
 
+(defn block-source
+  "Current editable code in execution order, including the pending extension."
+  [pane]
+  (let [sources (concat [(:source pane)] (extension-sources pane)
+                        (when-not (str/blank? (:extensionDraft pane)) [(:extensionDraft pane)]))
+        source (str/join "\n\n" sources)]
+    (if (or (empty? source) (str/ends-with? source "\n")) source (str source "\n"))))
+
+(defn block-filename [pane]
+  (let [filename (last (str/split (:filename pane) #"[/\\]"))]
+    (if (str/blank? filename)
+      (str "block-" (:id pane) ".lain")
+      (str (str/replace filename #"\.[^.]+$" "") ".lain"))))
+
 (defn extensions-edited? [pane]
   (not= (:extensions pane) (extension-sources pane)))
 
@@ -108,7 +122,7 @@
     :else (str "Running · " (count (:extensions p)) " extensions")))
 
 (def command-specs
-  [[:run "Run block"] [:load "Load Lain file…"]
+  [[:run "Run block"] [:load "Load Lain file…"] [:save-block "Save block to file…"]
    [:split-row "Split side by side"] [:split-column "Split stacked"]
    [:spawn "Spawn new block"] [:close "Close block"]
    [:value "Show value"] [:cell "Show cell details"] [:graph "Show topology"]

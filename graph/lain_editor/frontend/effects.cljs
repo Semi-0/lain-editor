@@ -5,6 +5,7 @@
             [graph.lain-editor.frontend.dom :as dom]
             [graph.lain-editor.frontend.desktops :as desktops]
             [graph.lain-editor.frontend.model :as model]
+            [graph.lain-editor.frontend.source-save :as source-save]
             [graph.lain-editor.frontend.state :as s]
             [graph.lain-editor.workspace :as workspace]
             [graph.lain-editor.layers :as layers]))
@@ -123,6 +124,17 @@
     (catch :default error
       (reset! s/message (str "Local draft storage: " (.-message error) ". Save JSON to keep your work.")))))
 
+(defn save-block! [id]
+  (when-not @s/busy?
+    (source-save/open!
+     (str "examples/lain/saved/" (model/block-filename (model/pane @s/workspace id)))
+     (fn [path replace?]
+       (let [pane (model/pane @s/workspace id)]
+         (-> (api! {:op "save-block" :pane id :path path :replace replace? :source (model/block-source pane)})
+             (.then (fn [result]
+                      (reset! s/message (str "Block saved to " (:path result)))
+                      result))))))))
+
 (defn perform! [{:keys [action target enabled]}]
   (when enabled
     (case action
@@ -133,6 +145,7 @@
       :switch-desktop (s/switch-desktop! target)
       :run (run! target "run")
       :load (.click (.querySelector (dom/pane-root target) "input[type=file]"))
+      :save-block (save-block! target)
       :split-row (add-pane! target "row")
       :split-column (add-pane! target "column")
       :spawn (add-pane! target nil)

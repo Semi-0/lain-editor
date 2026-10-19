@@ -67,3 +67,20 @@
     (is (= ["first" "second"] (model/extension-sources appended)))
     (is (not (contains? appended :extensionEdits)))
     (is (= "" (:extensionDraft appended)))))
+
+(deftest block-file-contains-current-code-and-drafts-in-order
+  (let [pane (assoc (model/new-pane "a") :source "; current draft\n(define input 1)"
+                    :executedSource "old source" :extensions ["old extension"]
+                    :extensionEdits ["(define result (+ input 2))"]
+                    :extensionDraft "(display result)")]
+    (is (= "; current draft\n(define input 1)\n\n(define result (+ input 2))\n\n(display result)\n"
+           (model/block-source pane)))
+    (is (= "block-a.lain" (model/block-filename pane)))
+    (is (= "sample.lain" (model/block-filename (assoc pane :filename "examples/sample.txt"))))
+    (is (= "sample.lain" (model/block-filename (assoc pane :filename "C:\\code\\sample.lain"))))
+    (is (= "(define x 1)\n" (model/block-source (assoc (model/new-pane "b") :source "(define x 1)\n"))))
+    (is (= "" (model/block-source (model/new-pane "b"))))
+    (is (= "a" (:target (first (model/matching-commands (model/commands (document) "a" {} false)
+                                                       "save block")))))
+    (is (:enabled (first (model/matching-commands (model/commands (document) "a" {} false)
+                                                 "save block"))))))

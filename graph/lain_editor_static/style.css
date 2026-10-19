@@ -258,3 +258,11 @@ footer { height: 31px; flex: none; display: flex; align-items: center; gap: 8px;
 .topology-fullscreen-shell:fullscreen { width: 100vw; height: 100vh; padding: 8px; box-sizing: border-box; }
 .topology-fullscreen-shell:-webkit-full-screen { width: 100vw; height: 100vh; padding: 8px; box-sizing: border-box; }
 .fullscreen-status { font-size: 11px; }
+.source-save { width: min(520px, calc(100vw - 32px)); color: #e5e5e5; background: var(--background); border: 1px solid var(--line); padding: 20px; }
+.source-save::backdrop { background: #0009; }
+.source-save h2 { font-size: 16px; margin: 0 0 16px; }
+.source-save label { display: block; }
+.source-save input[type=text] { display: block; width: 100%; box-sizing: border-box; margin-top: 8px; }
+.source-save p { font-size: 12px; line-height: 1.5; }
+.source-save .replace-file { display: flex; align-items: center; gap: 8px; }
+.source-save-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }

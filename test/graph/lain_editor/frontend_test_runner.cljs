@@ -1,6 +1,7 @@
 (ns graph.lain-editor.frontend-test-runner
   (:require [cljs.test :as test :refer-macros [run-tests]]
             [graph.lain-editor.frontend-model-test]
+            [graph.lain-editor.source-save-test]
             [graph.lain-editor.replay-model-test]
             [graph.lain-editor.graph-motion-test]
             [graph.lain-editor.node-clearance-test]
@@ -15,6 +16,6 @@
   (when-not (test/successful? result) (set! (.-exitCode js/process) 1)))
 
 (defn -main []
-  (run-tests 'graph.lain-editor.node-clearance-test 'graph.lain-editor.replay-model-test 'graph.lain-editor.graph-motion-test 'graph.lain-editor.layers-test 'graph.lain-editor.desktop-test 'graph.lain-editor.frontend-model-test 'graph.lain-editor.frontend-reactive-test 'graph.lain-editor.value-folding-test 'graph.lain-editor.layout-controls-test 'graph.lain-editor.fullscreen-test))
+  (run-tests 'graph.lain-editor.node-clearance-test 'graph.lain-editor.replay-model-test 'graph.lain-editor.graph-motion-test 'graph.lain-editor.layers-test 'graph.lain-editor.desktop-test 'graph.lain-editor.frontend-model-test 'graph.lain-editor.source-save-test 'graph.lain-editor.frontend-reactive-test 'graph.lain-editor.value-folding-test 'graph.lain-editor.layout-controls-test 'graph.lain-editor.fullscreen-test))
 
 (set! *main-cli-fn* -main)
