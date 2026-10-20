@@ -12,6 +12,9 @@
             [graph.lain-editor.layers :as layers]
             [graph.lain-editor.frontend.desktops :as desktops]
             [graph.lain-editor.frontend.effects :as effects]
+            [graph.lain-editor.frontend.development.dataflow :as development-dataflow]
+            [graph.lain-editor.frontend.development.effects :as development-effects]
+            [graph.lain-editor.development-protocol :as development-protocol]
             [graph.lain-editor.frontend.inspection :as inspection]
             [graph.lain-editor.frontend.state :as state]
             [graph.lain-editor.frontend.model :as model]
@@ -36,6 +39,25 @@
       (is (= before @computations) "Disposed formulas unlink from their inputs"))
     (is (= [2 3] @seen))
     (is (empty? @scope)) (j/destroy-cell! source)))
+
+(deftest development-dataflow-reduces-events-before-interpreting-effects
+  (let [scope (rx/scope) persisted (atom []) interpreted (atom [])
+        feature (development-dataflow/create!
+                 scope {:pane "pane-a" :portable-model nil
+                        :persist-model! #(swap! persisted conj %)})
+        client "client-a"
+        portable (development-protocol/portable-model
+                  "stack-spec-2026-10-20-r4" client
+                  (development-protocol/empty-instance client))]
+    (with-redefs [development-effects/interpret!
+                  (fn [pane effect _dispatch]
+                    (swap! interpreted conj [pane effect]))]
+      ((:dispatch! feature) {:event/type :development/enable :model portable}))
+    (is (= [portable] @persisted))
+    (is (= "pane-a" (ffirst @interpreted)))
+    (is (= :development/start (get-in @interpreted [0 1 :effect/op])))
+    (is (= :starting (get-in @(:state feature) [:view :status])))
+    (rx/dispose! scope)))
 
 (deftest source-edits-and-divider-resize-do-not-rebuild-layout
   (let [scope (rx/scope) initial (model/initial-workspace)

@@ -8,6 +8,7 @@
             [graph.lain-editor.desktop-test]
             [graph.lain-editor.layers-test]
             [graph.lain-editor.frontend-reactive-test]
+            [graph.lain-editor.frontend-stack-scene-model-test]
             [graph.lain-editor.value-folding-test]
             [graph.lain-editor.layout-controls-test]
             [graph.lain-editor.fullscreen-test]
@@ -19,6 +20,6 @@
 
 (defn -main []
   (run-tests 'graph.lain-editor.block-display-test 'graph.lain-editor.remote-files-test)
-  (run-tests 'graph.lain-editor.node-clearance-test 'graph.lain-editor.replay-model-test 'graph.lain-editor.graph-motion-test 'graph.lain-editor.layers-test 'graph.lain-editor.desktop-test 'graph.lain-editor.frontend-model-test 'graph.lain-editor.source-save-test 'graph.lain-editor.frontend-reactive-test 'graph.lain-editor.value-folding-test 'graph.lain-editor.layout-controls-test 'graph.lain-editor.fullscreen-test))
+  (run-tests 'graph.lain-editor.node-clearance-test 'graph.lain-editor.replay-model-test 'graph.lain-editor.graph-motion-test 'graph.lain-editor.layers-test 'graph.lain-editor.desktop-test 'graph.lain-editor.frontend-model-test 'graph.lain-editor.source-save-test 'graph.lain-editor.frontend-reactive-test 'graph.lain-editor.frontend-stack-scene-model-test 'graph.lain-editor.value-folding-test 'graph.lain-editor.layout-controls-test 'graph.lain-editor.fullscreen-test))
 
 (set! *main-cli-fn* -main)

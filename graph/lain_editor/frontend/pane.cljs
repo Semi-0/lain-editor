@@ -7,6 +7,7 @@
             [graph.lain-editor.frontend.block-display :as block-display]
             [graph.lain-editor.frontend.extension-editors :as extension-editors]
             [graph.lain-editor.frontend.composition :as composition]
+            [graph.lain-editor.frontend.development.view :as development-view]
             [graph.lain-editor.frontend.layer-panel :as layer-panel]
             [graph.lain-editor.frontend.outputs :as outputs]
             [graph.lain-editor.frontend.inspection :as inspection]
@@ -79,7 +80,16 @@
     (dom/append! (get planes "topology") topology)
     (dom/append! (:body presentation) area)
     (dom/append! root presentation-host footer)
-    (dom/append! footer (extension-view scope id descriptor) (layer-panel/mount! scope id descriptor))
+    (dom/append! footer (extension-view scope id descriptor)
+                  (development-view/mount!
+                   scope id descriptor
+                   (fn [portable]
+                     (s/change-pane! id
+                                     (fn [pane]
+                                       (if portable
+                                         (assoc pane :development portable)
+                                         (dissoc pane :development))))))
+                  (layer-panel/mount! scope id descriptor))
     (bind-source! scope id descriptor code file meta filename status)
     (composition/attach! scope area (:descriptor presentation) planes value)
     (outputs/attach! scope id descriptor request

@@ -1,11 +1,84 @@
 (ns graph.lain-editor.frontend-model-test
   (:require #?(:clj [clojure.test :refer [deftest is]] :cljs [cljs.test :refer-macros [deftest is]])
             [graph.lain-editor.frontend.model :as model]
+            [graph.lain-editor.frontend.development.model :as development-model]
+            [graph.lain-editor.development-protocol :as development-protocol]
             [graph.lain-editor.workspace :as workspace]))
 
 (defn document []
   {:format "lain-tiled-editor" :version 1 :panes [(model/new-pane "a")]
    :layout {:type "pane" :id "a"}})
+
+(deftest development-transition-declares-effects-and-separates-portable-state
+  (let [client "test-client"
+        portable (development-protocol/portable-model
+                  "stack-spec-2026-10-20-r4" client
+                  (development-protocol/empty-instance client))
+        enabled (development-model/transition
+                 (development-model/initial nil)
+                 {:event/type :development/enable :model portable})
+        started (development-model/transition
+                 (:state enabled)
+                 {:event/type :development/start-succeeded
+                  :generation "generation-1" :instance (:instance portable)})
+        commit (development-model/transition
+                (:state started)
+                {:event/type :development/commit :commit-id "commit-1"
+                 :index 0 :text "42"})]
+    (is (= :development/start (get-in enabled [:effects 0 :effect/op])))
+    (is (= :active (get-in started [:state :view :status])))
+    (is (= "generation-1" (get-in started [:state :remote :generation])))
+    (is (= {:effect/op :development/commit :generation "generation-1"
+            :commit-id "commit-1" :client-id client :index 0
+            :expected-version nil :text "42"}
+           (first (:effects commit))))
+    (is (not (contains? (:model (:state commit)) :generation))
+        "server capability tokens are not part of the portable model")))
+
+(deftest development-success-persists-ledger-and-failure-keeps-last-success
+  (let [client "test-client"
+        portable (development-protocol/portable-model
+                  "stack-spec-2026-10-20-r4" client
+                  (development-protocol/empty-instance client))
+        active (:state (development-model/transition
+                        (:state (development-model/transition
+                                 (development-model/initial nil)
+                                 {:event/type :development/enable :model portable}))
+                        {:event/type :development/start-succeeded
+                         :generation "generation-1" :instance (:instance portable)}))
+        committed-instance (update (:instance portable) :commits conj
+                                   {:commit-id "commit-1" :client-id client
+                                    :index 0 :expected-version nil :text "42"})
+        committed (:state (development-model/transition
+                           active {:event/type :development/commit-succeeded
+                                   :generation "generation-2"
+                                   :instance committed-instance
+                                   :receipt {:version 0}}))
+        failed (:state (development-model/transition
+                        committed {:event/type :development/commit-failed
+                                   :message "compile failed"}))]
+    (is (= committed-instance (get-in failed [:model :instance])))
+    (is (= "generation-2" (get-in failed [:remote :generation])))
+    (is (= :active (get-in failed [:view :status])))
+    (is (nil? (development-model/expected-version (:model failed) 1)))
+    (is (= 0 (development-model/expected-version (:model failed) 0)))))
+
+(deftest development-ledger-round-trips-and-is-archived-with-source
+  (let [client "archive-client"
+        portable (development-protocol/portable-model
+                  "stack-spec-2026-10-20-r4" client
+                  (development-protocol/empty-instance client))
+        split (-> (document)
+                  (model/update-pane "a" assoc :development portable)
+                  (model/split-pane "a" "row" (model/new-pane "b")))
+        validated (workspace/validate split)
+        archived (model/close-pane validated "a" "development-archive")]
+    (is (= portable (get-in archived [:closedBlocks 0 :pane :development])))
+    (is (= archived (workspace/validate archived)))
+    (is (thrown? #?(:clj Exception :cljs js/Error)
+                 (workspace/validate
+                  (assoc-in split [:panes 0 :development :instance :schema]
+                            "unknown"))))))
 
 (deftest layout-transitions-preserve-contracts
   (let [split (-> (document)

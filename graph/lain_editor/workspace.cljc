@@ -1,6 +1,7 @@
 (ns graph.lain-editor.workspace
   "Portable editor documents contain source and layout, never JVM objects."
   (:require [clojure.string :as str]
+            [graph.lain-editor.development-protocol :as development]
             [graph.lain-editor.layers :as layers]))
 
 (defn ensure! [condition message]
@@ -31,6 +32,8 @@
   (when (contains? pane :layers) (layers/validate! (:layers pane)))
   (when (contains? pane :layerMode)
     (ensure! (contains? #{"overlay" "stack"} (:layerMode pane)) "Unknown layer composition"))
+  (when (contains? pane :development)
+    (development/validate-portable-model! (:development pane)))
   pane)
 
 (def archive-capacity 64)

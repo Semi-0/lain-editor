@@ -42,23 +42,26 @@
         extensions (model/extension-sources pane)
         source (case op "run" (:source pane) "extend" (:extensionDraft pane)
                      (throw (js/Error. "Unknown source operation")))]
-    (operation!
-     id
-     #(-> (api! {:op op :pane id :source source :extensions (if (= op "run") extensions []) :generation (get @s/generations id)})
-          (.then (fn [result]
-                   (dosync
-                    (s/change-pane! id
-                                    (fn [p]
-                                      (case op
-                                        "run" (model/committed-source p source extensions)
-                                        "extend" (model/extended-source p source)
-                                        (throw (js/Error. "Unknown source operation")))))
-                    (when-let [mode (:displayMode result)]
-                      (s/change-pane! id layers/program-output mode))
-                    (swap! s/errors dissoc id)
-                    (swap! s/expansions dissoc id)
-                    (swap! s/generations assoc id (:generation result))
-                    (reset! s/message "Runtime updated · each block has an independent session"))))))))
+    (if (and (:development pane) (= op "run"))
+      (when-let [panel (.querySelector (dom/pane-root id) ".development-panel")]
+        (.dispatchEvent panel (js/Event. "lain-development-commit")))
+      (operation!
+       id
+       #(-> (api! {:op op :pane id :source source :extensions (if (= op "run") extensions []) :generation (get @s/generations id)})
+            (.then (fn [result]
+                     (dosync
+                      (s/change-pane! id
+                                      (fn [p]
+                                        (case op
+                                          "run" (model/committed-source p source extensions)
+                                          "extend" (model/extended-source p source)
+                                          (throw (js/Error. "Unknown source operation")))))
+                      (when-let [mode (:displayMode result)]
+                        (s/change-pane! id layers/program-output mode))
+                      (swap! s/errors dissoc id)
+                      (swap! s/expansions dissoc id)
+                      (swap! s/generations assoc id (:generation result))
+                      (reset! s/message "Runtime updated · each block has an independent session")))))))))
 
 (defn restore!
   ([input] (restore! input {}))

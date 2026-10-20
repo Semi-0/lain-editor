@@ -78,7 +78,7 @@
     {:id archive-id :order (next-close-order document)
      :pane (select-keys p [:id :title :filename :source :executedSource
                            :extensions :extensionEdits :extensionDraft
-                           :outputRatio :layerMode :layers :display])}))
+                           :outputRatio :layerMode :layers :display :development])}))
 
 (defn close-pane
   ([document id] (close-pane document id (str (random-uuid))))

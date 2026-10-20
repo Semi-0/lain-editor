@@ -6,6 +6,7 @@
             [graph.lain-editor.frontend.effects :as effects]
             [graph.lain-editor.frontend.value-view :as value-view]
             [graph.lain-editor.frontend.replay :as replay]
+            [graph.lain-editor.frontend.stack-scene :as stack-scene]
             [graph.lain-editor.frontend.graph-updates :as updates]
             [graph.lain-editor.frontend.reactive :as rx]
             [graph.lain-editor.frontend.state :as s]))
@@ -46,6 +47,24 @@
                           ((get-in @mounted [:handle :update!]) (:replay result))
                           (do (clear!)
                               (reset! mounted {:key key :handle (replay/mount! body (:replay result) request)}))))
+                      (:stackScene result)
+                      (let [scene (:stackScene result)
+                            key [(dissoc request :refresh) :stack-scene (:root scene)]]
+                        (when (not= key (:key @mounted))
+                          (clear!)
+                          (reset! mounted
+                                  {:key key
+                                   :handle (stack-scene/mount!
+                                            body scene
+                                            (fn [node signal chase?]
+                                              (effects/api!
+                                               (assoc (dissoc request :refresh)
+                                                      :op "inspect" :parent nil
+                                                      :node node :chase chase?)
+                                               signal))
+                                            #(swap! s/expansions assoc id %)
+                                            (assoc request :view-state view-state)
+                                            (constantly false))})))
                       next-graph
                      (let [key [(dissoc request :refresh) (updates/shape next-graph)]
                            view-key (select-keys request [:pane :display :parent])
