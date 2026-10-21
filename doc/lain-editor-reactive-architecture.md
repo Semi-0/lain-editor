@@ -17,7 +17,7 @@ feature at a time.
 ```clojure
 ;; Portable model: source facts required to reconstruct a development session.
 {:mode "versioned-premise"
- :specificationRevision "stack-spec-2026-10-20-r4"
+ :specificationRevision "stack-spec-2026-10-20-r9"
  :clientId "pane-owned-logical-client"
  :instance {:schema "compiler-2/versioned-instance"
             :schema-version 1

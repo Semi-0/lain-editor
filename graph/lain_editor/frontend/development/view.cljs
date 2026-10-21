@@ -5,7 +5,7 @@
             [graph.lain-editor.frontend.dom :as dom]
             [graph.lain-editor.frontend.reactive :as rx]))
 
-(def specification-revision "stack-spec-2026-10-20-r4")
+(def specification-revision "stack-spec-2026-10-20-r9")
 
 (defn mount! [scope pane-id descriptor persist-model!]
   (let [root (dom/element "details" "development-panel")

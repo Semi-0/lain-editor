@@ -47,7 +47,7 @@
                         :persist-model! #(swap! persisted conj %)})
         client "client-a"
         portable (development-protocol/portable-model
-                  "stack-spec-2026-10-20-r4" client
+                  "stack-spec-2026-10-20-r9" client
                   (development-protocol/empty-instance client))]
     (with-redefs [development-effects/interpret!
                   (fn [pane effect _dispatch]

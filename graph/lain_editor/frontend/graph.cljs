@@ -189,6 +189,8 @@
         (rx/own! scope #(.disconnect observer)))
       (dom/listen! scope (.closest body ".pane") "lain-fit-graph" (fn [_] (fit)))
       (rx/watch! scope drawing #(draw! world @elements %))
+      (when-let [geometry-changed! (:geometry-changed! request)]
+        (rx/watch! scope drawing (fn [_] (geometry-changed!))))
       (doseq [event ["pointerdown" "wheel"]]
         (dom/listen! scope canvas event
                      (fn [_]
@@ -209,6 +211,15 @@
                       (rx/dispose! scope))
        :clear-detail! (:clear! inspection)
        :refresh-detail! (:refresh! inspection)
+       :node-screen-point
+       (fn [id]
+         (when-let [group (:group
+                           (some (fn [item]
+                                   (when (= id (get-in item [:node :id])) item))
+                                 (:nodes @elements)))]
+           (let [bounds (.getBoundingClientRect group)]
+             {:x (+ (.-left bounds) (/ (.-width bounds) 2))
+              :y (+ (.-top bounds) (/ (.-height bounds) 2))})))
        :update! (fn [graph changed]
                   (let [old (into {} (map #(vector (get-in % [:node :id]) %) (:nodes @elements)))
                         references (into {} (mapcat (fn [node] (map #(vector % node) (:referenceTokens node)))) (:nodes graph))
