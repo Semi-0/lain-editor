@@ -155,6 +155,13 @@
     (is (false? (:enabled (first (model/matching-commands commands "apply")))))
     (is (= [:save :save-as]
            (mapv :action (model/matching-commands commands "save workspace"))))
+    (is (= #{:toggle-fullscreen :toggle-visualizer :toggle-fill
+             :edit-extension :development-settings :layer-settings}
+           (set (map :action
+                     (filter #(contains? #{:toggle-fullscreen :toggle-visualizer :toggle-fill
+                                           :edit-extension :development-settings :layer-settings}
+                                         (:action %))
+                             commands)))))
     (is (empty? (model/matching-commands commands "missing")))
     (is (every? (complement :enabled) (model/commands (document) "a" {} true)))))
 

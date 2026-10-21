@@ -6,7 +6,7 @@
             [graph.lain-editor.frontend.viewport :as viewport]))
 
 (defn- fixture []
-  (let [elements (atom []) actions (atom []) listeners (atom {})
+  (let [elements (atom []) listeners (atom {})
         document #js {:addEventListener (fn [event handler] (swap! listeners assoc event handler))
                       :removeEventListener (fn [event _handler] (swap! listeners dissoc event))}
         element (fn [tag & [class text]]
@@ -16,18 +16,14 @@
                                   :appendChild (fn [child] (.push children child))}]
                     (swap! elements conj {:tag tag :class class :node node}) node))
         scope (rx/scope)
-        body (with-redefs [dom/element element
-                          dom/button (fn [label action]
-                                       (swap! actions conj action) (element "button" "" label))]
-               (fullscreen/mount! scope (element "div") document))]
-    {:scope scope :document document :listeners listeners :body body
-     :root (:node (first (filter #(= "topology-fullscreen-shell" (:class %)) @elements)))
-     :button (:node (first (filter #(= "button" (:tag %)) @elements)))
-     :status (:node (first (filter #(= "fullscreen-status" (:class %)) @elements)))
-     :toggle! (first @actions)}))
+        shell (with-redefs [dom/element element]
+                (fullscreen/shell! scope (element "div") document {}))]
+    {:scope scope :document document :listeners listeners :body (:body shell)
+     :root (:root shell) :status (:status shell) :toggle! (:toggle! shell)
+     :active? (:active? shell) :elements elements}))
 
 (deftest fullscreen-keeps-mounted-content-and-cleans-up-its-owned-listeners
-  (let [{:keys [scope document listeners body root button toggle!]} (fixture)
+  (let [{:keys [scope document listeners body root toggle! active? elements]} (fixture)
         requests (atom 0) exits (atom 0) graph #js {:identity "existing graph and timeline"}]
     (.appendChild body graph)
     (set! (.-requestFullscreen root)
@@ -37,20 +33,20 @@
           (fn [] (swap! exits inc) (set! (.-fullscreenElement document) nil)
             (when-let [sync (get @listeners "fullscreenchange")] (sync nil))
             (js/Promise.resolve nil)))
-    (is (= "Enter fullscreen topology" (aget (.-attributes button) "aria-label")))
+    (is (empty? (filter #(= "button" (:tag %)) @elements))
+        "fullscreen is controlled through the command palette, not an inline button")
     (toggle!)
     (is (= 1 @requests))
-    (is (= "Exit full screen" (.-textContent button)))
-    (is (= "true" (aget (.-attributes button) "aria-pressed")))
+    (is (active?))
     (is (identical? graph (aget (.-children body) 0)))
     (toggle!)
     (is (= 1 @exits))
-    (is (= "Full screen" (.-textContent button)))
+    (is (not (active?)))
     (toggle!)
     ;; Escape is handled by the browser, which reports a fullscreenchange.
     (set! (.-fullscreenElement document) nil)
     ((get @listeners "fullscreenchange") nil)
-    (is (= "false" (aget (.-attributes button) "aria-pressed")))
+    (is (not (active?)))
     (toggle!)
     (rx/dispose! scope)
     (is (= 2 @exits))
@@ -58,7 +54,7 @@
     (is (identical? graph (aget (.-children body) 0)))))
 
 (deftest prefixed-fullscreen-api-is-supported
-  (let [{:keys [scope document listeners root button toggle!]} (fixture)
+  (let [{:keys [scope document listeners root toggle! active?]} (fixture)
         exits (atom 0)]
     (set! (.-webkitRequestFullscreen root)
           (fn [] (set! (.-webkitFullscreenElement document) root)
@@ -67,7 +63,7 @@
           (fn [] (swap! exits inc) (set! (.-webkitFullscreenElement document) nil)
             ((get @listeners "webkitfullscreenchange") nil)))
     (toggle!)
-    (is (= "Exit full screen" (.-textContent button)))
+    (is (active?))
     (toggle!)
     (is (= 1 @exits))
     (rx/dispose! scope)))

@@ -183,8 +183,12 @@
    [:spawn "Spawn new block"] [:close "Close block"]
    [:value "Show value"] [:cell "Show cell details"] [:graph "Show topology"]
    [:upstream "Trace upstream"] [:downstream "Trace downstream"] [:both "Trace both directions"]
-   [:layer-settings "Edit display layers"] [:fit-graph "Compact topology"] [:root-graph "Return to root topology"]
-   [:refresh "Refresh output"] [:edit-extension "Edit extension code"] [:extend "Apply extension"]
+   [:toggle-fullscreen "Toggle fullscreen visualizer"]
+   [:toggle-visualizer "Hide or show visualizer"]
+   [:toggle-fill "Fill or restore visualizer"]
+   [:layer-settings "Toggle display layers"] [:fit-graph "Compact topology"] [:root-graph "Return to root topology"]
+   [:refresh "Refresh output"] [:edit-extension "Toggle extension editor"] [:extend "Apply extension"]
+   [:development-settings "Toggle incremental development"]
    [:new-workspace "New workspace"] [:save "Save workspace"]
    [:save-as "Save workspace as…"] [:open "Open workspace JSON…"]])
 

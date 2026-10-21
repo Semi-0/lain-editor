@@ -6,7 +6,6 @@
 (defn shell!
   [scope host document {:keys [label on-change] :or {label "topology"}}]
    (let [root (dom/element "div" "topology-fullscreen-shell")
-         toolbar (dom/element "div" "topology-fullscreen-toolbar")
          body (dom/element "div" "topology-content topology-fullscreen-content")
          status (dom/element "span" "fullscreen-status")
          alive? (atom true)
@@ -28,23 +27,18 @@
                               (fn? (.-requestFullscreen root)) (.requestFullscreen root)
                               (fn? (.-webkitRequestFullscreen root)) (.webkitRequestFullscreen root)
                               :else (throw (js/Error. "Fullscreen is unavailable in this browser")))))
-         button (dom/button "Full screen" #(if (active?) (leave!) (enter!)))
+         toggle! #(if (active?) (leave!) (enter!))
          sync! (fn [_]
-                 (dom/text! button (if (active?) "Exit full screen" "Full screen"))
-                 (.setAttribute button "aria-label"
-                                (str (if (active?) "Exit fullscreen " "Enter fullscreen ") label))
-                 (.setAttribute button "aria-pressed" (str (active?)))
                  (when on-change (on-change (active?))))]
-     (.setAttribute button "title" (str "Expand " label "; Escape exits fullscreen."))
      (.setAttribute status "role" "status")
-     (dom/append! toolbar button status)
-     (dom/append! root toolbar body)
+     (.setAttribute status "aria-label" (str "Fullscreen " label " status"))
+     (dom/append! root status body)
      (dom/append! host root)
      (dom/listen! scope document "fullscreenchange" sync!)
      (dom/listen! scope document "webkitfullscreenchange" sync!)
      (sync! nil)
      (rx/own! scope #(do (reset! alive? false) (when (active?) (leave!))))
-     {:body body :toolbar toolbar :root root}))
+     {:body body :root root :status status :toggle! toggle! :active? active?}))
 
 (defn mount!
   ([scope host] (mount! scope host js/document))

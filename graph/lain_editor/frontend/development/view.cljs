@@ -19,6 +19,7 @@
                                          :portable-model (:development @descriptor)
                                          :persist-model! persist-model!})
         dispatch! (:dispatch! feature)]
+    (set! (.-hidden summary) true)
     (set! (.-onclick enable)
           #(let [client-id (str "editor-" pane-id)]
              (dispatch! {:event/type :development/enable

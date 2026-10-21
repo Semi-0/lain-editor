@@ -17,26 +17,18 @@
     (throw (ex-info "Unknown block presentation" {:mode mode}))))
 
 #?(:cljs
-   (defn mount! [scope host descriptor]
+   (defn mount! [scope host command-source descriptor]
      (let [mode (rx/input! scope :normal)
            fullscreen? (rx/input! scope false)
            shell (fullscreen/shell! scope host js/document
                                     {:label "block visualizer" :on-change #(reset! fullscreen? %)})
-           hide (dom/button "Hide visualizer" #(swap! mode (fn [m] (if (= m :hidden) :normal :hidden))))
-           fill (dom/button "Fill block" #(swap! mode (fn [m] (if (= m :fill) :normal :fill))))
+           toggle-visibility! #(swap! mode (fn [m] (if (= m :hidden) :normal :hidden)))
+           toggle-fill! #(swap! mode (fn [m] (if (= m :fill) :normal :fill)))
            effective (rx/derive! scope #(if %2 :fill %1) mode fullscreen?)
            pane (rx/derive! scope presented-pane descriptor effective)]
-       (.setAttribute hide "aria-label" "Toggle block visualizer visibility")
-       (.setAttribute fill "aria-label" "Toggle visualizer filling block")
-       (dom/append! (:toolbar shell) hide fill)
-       (rx/watch! scope mode
-                  (fn [m]
-                    (dom/text! hide (if (= m :hidden) "Show visualizer" "Hide visualizer"))
-                    (dom/text! fill (if (= m :fill) "Restore block" "Fill block"))
-                    (.setAttribute hide "aria-pressed" (str (= m :hidden)))
-                    (.setAttribute fill "aria-pressed" (str (= m :fill)))))
-       (rx/watch! scope fullscreen?
-                  #(do (set! (.-disabled hide) %) (set! (.-disabled fill) %)))
+       (dom/listen! scope command-source "lain-toggle-fullscreen" (fn [_] ((:toggle! shell))))
+       (dom/listen! scope command-source "lain-toggle-visualizer" (fn [_] (toggle-visibility!)))
+       (dom/listen! scope command-source "lain-toggle-fill" (fn [_] (toggle-fill!)))
        (rx/watch! scope effective
                   (fn [m]
                     (.toggle (.-classList host) "block-display-fill" (= m :fill))

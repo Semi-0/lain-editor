@@ -16,7 +16,9 @@
             [graph.lain-editor.frontend.state :as s]))
 
 (defn- extension-view [scope id descriptor]
-  (let [details (dom/element "details" "extension") draft (dom/element "textarea")
+  (let [details (dom/element "details" "extension")
+        summary (dom/element "summary" "" "Extend this running block")
+        draft (dom/element "textarea")
         apply (dom/button "Apply extension" #(effects/run! id "extend"))
         disabled (rx/derive! scope #(or %1 (str/blank? (:extensionDraft %2))
                                        (model/extensions-edited? %2) (not (contains? %3 id)))
@@ -24,12 +26,13 @@
     (.setAttribute draft "aria-label" "Extension code")
     (set! (.-placeholder draft) "(define next (+ result 1))")
     (set! (.-oninput draft) #(s/change-pane! id assoc :extensionDraft (.. % -target -value)))
+    (set! (.-hidden summary) true)
     (rx/watch! scope descriptor
                (fn [p]
                  (dom/value! draft (:extensionDraft p))))
     (rx/watch! scope disabled #(set! (.-disabled apply) %))
     (rx/watch! scope s/busy? #(set! (.-readOnly draft) %))
-    (dom/append! details (dom/element "summary" "" "Extend this running block") draft apply)))
+    (dom/append! details summary draft apply)))
 
 (defn- bind-source! [scope id descriptor code file meta filename status]
   (set! (.-oninput code) #(s/change-pane! id assoc :source (.. % -target -value)))
@@ -59,7 +62,7 @@
         value (dom/element "pre" "value-view") cell (dom/element "pre" "cell-view")
         topology (dom/element "div" "display-body topology-content") footer (dom/element "div" "pane-tools")
         presentation-host (dom/element "div" "block-display")
-        presentation (block-display/mount! scope presentation-host descriptor)]
+        presentation (block-display/mount! scope presentation-host root descriptor)]
     (set! (.. root -dataset -paneId) id) (set! (.-tabIndex root) 0)
     (.setAttribute root "aria-label" (str "Editor " (inc index)))
     (.setAttribute code "aria-label" (str "Lain code " (inc index))) (set! (.-spellcheck code) false)

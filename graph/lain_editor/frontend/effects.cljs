@@ -174,6 +174,17 @@
                       (reset! s/message (str "Block saved to " (:path result)))
                       result))))))))
 
+(defn- dispatch-pane-command! [id event]
+  (.dispatchEvent (dom/pane-root id) (js/Event. event)))
+
+(defn- toggle-panel! [id selector focus-selector]
+  (let [panel (.querySelector (dom/pane-root id) selector)
+        opening? (not (.-open panel))]
+    (set! (.-open panel) opening?)
+    (when (and opening? focus-selector)
+      (when-let [target (.querySelector panel focus-selector)]
+        (.focus target)))))
+
 (defn perform! [{:keys [action target archive enabled]}]
   (when enabled
     (case action
@@ -192,13 +203,16 @@
       :reopen-closed (reopen-closed-block! archive)
       (:value :cell :graph) (s/set-display! target :mode (name action))
       (:upstream :downstream :both) (s/set-display! target :direction (name action))
-      :layer-settings (set! (.-open (.querySelector (dom/pane-root target) ".layer-panel")) true)
+      :toggle-fullscreen (dispatch-pane-command! target "lain-toggle-fullscreen")
+      :toggle-visualizer (dispatch-pane-command! target "lain-toggle-visualizer")
+      :toggle-fill (dispatch-pane-command! target "lain-toggle-fill")
+      :layer-settings (toggle-panel! target ".layer-panel" "input[aria-label='Output binding']")
       :fit-graph (.dispatchEvent (dom/pane-root target) (js/Event. "lain-fit-graph"))
       :root-graph (dosync (swap! s/expansions dissoc target) (s/refresh! target))
       :refresh (dosync (swap! s/expansions dissoc target) (s/refresh! target))
-      :edit-extension (let [details (.querySelector (dom/pane-root target) ".extension")]
-                        (set! (.-open details) true) (.focus (.querySelector details "textarea")))
+      :edit-extension (toggle-panel! target ".extension" "textarea")
       :extend (run! target "extend")
+      :development-settings (toggle-panel! target ".development-panel" nil)
       :save (save-workspace!)
       :save-as (save-workspace-as!)
       :open (.click (.getElementById js/document "open"))

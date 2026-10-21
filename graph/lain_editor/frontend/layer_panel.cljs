@@ -21,7 +21,8 @@
     {:root root :check check :up up :down down}))
 
 (defn mount! [scope id descriptor]
-  (let [details (dom/element "details" "options layer-panel") popup (dom/element "div" "popover layer-popup")
+  (let [details (dom/element "details" "options layer-panel") summary (dom/element "summary" "" "Layers")
+        popup (dom/element "div" "popover layer-popup")
         list (dom/element "div" "layer-list") mode (dom/element "select") binding (dom/element "input")
         rows (into {} (map (fn [layer-id] [layer-id (row id layer-id)])) ["code" "result" "topology" "cell"])
         view (rx/derive! scope (fn [pane busy?]
@@ -38,7 +39,8 @@
       (set! (.-onkeydown binding) #(when (= "Enter" (.-key %)) (.preventDefault %) (commit))))
     (dom/append! popup (dom/element "div" "layer-heading" "Layers · top → bottom") mode list
                  (dom/element "label" "layer-binding" "Output binding") binding)
-    (dom/append! details (dom/element "summary" "" "Layers") popup)
+    (set! (.-hidden summary) true)
+    (dom/append! details summary popup)
     (rx/watch! scope view
                (fn [pane]
                  (set! (.-disabled mode) (:busy? pane)) (set! (.-disabled binding) (:busy? pane))
