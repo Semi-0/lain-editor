@@ -20,8 +20,11 @@
     (set! (.. line -style -width) (str length "px"))
     (set! (.. line -style -transform) (str "rotate(" angle "rad)"))))
 
-(defn- edge! [layer {:keys [kind] :as edge}]
+(defn- edge! [layer {:keys [kind from to source-node] :as edge}]
   (let [line (dom/element "div" (str "stack-scene-edge " (name kind)))]
+    (.setAttribute line "role" "img")
+    (.setAttribute line "aria-label"
+                   (str (name kind) " from " from " node " source-node " to " to))
     (position-edge! line edge)
     (dom/append! layer line)
     line))
@@ -39,6 +42,7 @@
         world (dom/element "div" "stack-scene-world")
         edges (dom/element "div" "stack-scene-edges")
         layout (model/layout scene @camera)
+        summary (model/scene-summary scene)
         graph-handles (atom {})
         plane-nodes (atom {})
         edge-nodes (mapv (fn [edge] {:edge edge :line (edge! edges edge)}) (:edges layout))
@@ -79,7 +83,7 @@
           #(swap! camera assoc :depth-spacing (js/parseInt (.. % -target -value) 10)))
     (dom/append! toolbar
                  (dom/element "span" "stack-scene-summary"
-                              (str (count (:planes scene)) " semantic planes"))
+                              (model/summary-text summary))
                  spacing
                  (dom/button "Reset camera" #(reset! camera model/default-camera)))
     (dom/append! world edges)
@@ -89,12 +93,19 @@
     (doseq [{:keys [identity graph] :as plane} (:planes scene)]
       (let [{:keys [x y]} (get-in layout [:positions identity])
             plane-node (dom/element "section" "stack-scene-plane")
-            title (dom/element "header" "stack-scene-plane-title" identity)
+            title-view (model/plane-title plane)
+            title (dom/element "header" "stack-scene-plane-title")
+            depth-label (dom/element "span" "stack-scene-depth-label"
+                                     (:depth-label title-view))
+            identity-label (dom/element "span" "stack-scene-identity"
+                                        (:identity-label title-view))
             graph-body (dom/element "div" "stack-scene-plane-graph")]
         (set! (.. plane-node -style -left) (str x "px"))
         (set! (.. plane-node -style -top) (str y "px"))
         (.setAttribute plane-node "data-depth" (:depth plane))
+        (.setAttribute plane-node "aria-label" (:aria-label title-view))
         (swap! plane-nodes assoc identity plane-node)
+        (dom/append! title depth-label identity-label)
         (dom/append! plane-node title graph-body)
         (dom/append! world plane-node)
         (swap! graph-handles assoc identity

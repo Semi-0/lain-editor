@@ -2,6 +2,32 @@
 
 (def default-camera {:x 36 :y 28 :scale 0.72 :depth-spacing 230})
 
+(defn- edge-kind [edge]
+  (let [kind (:kind edge)]
+    (if (keyword? kind) (name kind) (str kind))))
+
+(defn scene-summary
+  "Presentation facts derived only from the immutable stack scene."
+  [scene]
+  (let [planes (:planes scene)
+        edges (:edges scene)]
+    {:planes (count planes)
+     :expansions (count (filter #(= "expansion" (edge-kind %)) edges))
+     :references (count (filter #(= "reference" (edge-kind %)) edges))
+     :max-depth (reduce max 0 (map #(or (:depth %) 0) planes))}))
+
+(defn summary-text [{:keys [planes expansions references max-depth]}]
+  (str planes " semantic " (if (= 1 planes) "plane" "planes")
+       " · " expansions " " (if (= 1 expansions) "expansion" "expansions")
+       (when (pos? references)
+         (str " · " references " " (if (= 1 references) "reference" "references")))
+       " · depth " max-depth))
+
+(defn plane-title [{:keys [identity depth]}]
+  {:depth-label (str "D" (or depth 0))
+   :identity-label (str identity)
+   :aria-label (str "Stack plane depth " (or depth 0) ", " identity)})
+
 (defn plane-position [{:keys [depth order]} depth-spacing]
   {:x (+ 32 (* order 410))
    :y (+ 28 (* depth depth-spacing))})
