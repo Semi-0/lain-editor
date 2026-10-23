@@ -63,6 +63,25 @@
                       (swap! s/generations assoc id (:generation result))
                       (reset! s/message "Runtime updated · each block has an independent session")))))))))
 
+(defn spawn-slots! [id]
+  (operation!
+   id
+   #(-> (api! {:op "spawn-slot" :pane id :generation (get @s/generations id)})
+        (.then (fn [{:keys [source slots skipped generation displayMode]}]
+                 (dosync
+                  (when (seq slots)
+                    (s/change-pane! id model/extended-source source)
+                    (swap! s/expansions dissoc id))
+                  (when displayMode (s/change-pane! id layers/program-output displayMode))
+                  (swap! s/generations assoc id generation)
+                  (swap! s/errors dissoc id)
+                  (reset! s/message
+                          (str (if (seq slots)
+                                 (str "Spawned " (count slots) " callable slots · outputs remain unresolved")
+                                 "No undefined callable slots")
+                               (when (seq skipped)
+                                 (str " · " (count skipped) " scoped/computed slots cannot be filled from this block"))))))))))
+
 (defn restore!
   ([input] (restore! input {}))
   ([input options]
@@ -199,6 +218,7 @@
       :split-row (add-pane! target "row")
       :split-column (add-pane! target "column")
       :spawn (add-pane! target nil)
+      :spawn-slot (spawn-slots! target)
       :close (close-pane! target)
       :reopen-closed (reopen-closed-block! archive)
       (:value :cell :graph) (s/set-display! target :mode (name action))

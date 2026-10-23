@@ -180,7 +180,7 @@
 (def command-specs
   [[:run "Run block"] [:load "Load Lain file…"] [:save-block "Save block to file…"]
    [:split-row "Split side by side"] [:split-column "Split stacked"]
-   [:spawn "Spawn new block"] [:close "Close block"]
+   [:spawn "Spawn new block"] [:spawn-slot "Spawn slot"] [:close "Close block"]
    [:value "Show value"] [:cell "Show cell details"] [:graph "Show topology"]
    [:upstream "Trace upstream"] [:downstream "Trace downstream"] [:both "Trace both directions"]
    [:toggle-fullscreen "Toggle fullscreen visualizer"]
@@ -202,6 +202,11 @@
                               :close (and (> (count (desktops/pane-ids document)) 1)
                                           (< (count (get document :closedBlocks []))
                                              workspace/archive-capacity))
+                              :spawn-slot (and (contains? generations id)
+                                               (not (:development p))
+                                               (= (:source p) (:executedSource p))
+                                               (not (extensions-edited? p))
+                                               (str/blank? (:extensionDraft p)))
                               :extend (and (contains? generations id)
                                            (not (extensions-edited? p))
                                            (not (str/blank? (:extensionDraft p))))
