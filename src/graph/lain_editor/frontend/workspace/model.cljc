@@ -70,6 +70,22 @@
   (get document :nextClosedBlockOrder
        (inc (reduce max -1 (map :order (get document :closedBlocks []))))))
 
+(defn detach-pane
+  "Remove a pane without archiving drafts. Keep a blank pane on an empty desktop."
+  [document id fresh]
+  (workspace/ensure! (some #{id} (desktops/pane-ids document)) "Unknown pane in this desktop")
+  (let [remaining (filterv #(not= id (:id %)) (:panes document))
+        layout (remove-leaf (get-in document (desktops/layout-path document)) id)
+        next-document (-> document
+                          (assoc :panes remaining)
+                          (assoc-in (desktops/layout-path document) layout))]
+    (if layout
+      (desktops/select-pane next-document (first (desktops/pane-ids next-document)))
+      (-> next-document
+          (update :panes conj fresh)
+          (assoc-in (desktops/layout-path document) {:type "pane" :id (:id fresh)})
+          (desktops/select-pane (:id fresh))))))
+
 (defn archive-entry
   "Portable source-only record. Runtime capabilities are intentionally excluded."
   [document id archive-id]
@@ -154,6 +170,11 @@
 (defn extensions-edited? [pane]
   (not= (:extensions pane) (extension-sources pane)))
 
+(defn draft-edits? [pane]
+  (or (not= (:source pane) (:executedSource pane))
+      (extensions-edited? pane)
+      (not (str/blank? (:extensionDraft pane)))))
+
 (defn edit-extension [pane index source]
   (workspace/ensure! (< -1 index (count (:extensions pane))) "Unknown extension")
   (assoc pane :extensionEdits (assoc (extension-sources pane) index source)))
@@ -186,6 +207,7 @@
   [[:run "Run block"] [:load "Load Lain file…"] [:save-block "Save block to file…"]
    [:split-row "Split side by side"] [:split-column "Split stacked"]
    [:spawn "Spawn new block"] [:spawn-slot "Spawn slot"] [:close "Close block"]
+   [:detach-session "Detach running session"]
    [:value "Show value"] [:cell "Show cell details"] [:graph "Show topology"]
    [:upstream "Trace upstream"] [:downstream "Trace downstream"] [:both "Trace both directions"]
    [:toggle-fullscreen "Toggle fullscreen visualizer"]
@@ -205,6 +227,8 @@
              {:action action :label label :target id
               :enabled (and (not busy?) (some? p)
                             (case action
+                              :detach-session (and (contains? generations id)
+                                                   (some? (:executedSource p)))
                               :close (and (> (count (desktops/pane-ids document)) 1)
                                           (< (count (get document :closedBlocks []))
                                              workspace/archive-capacity))

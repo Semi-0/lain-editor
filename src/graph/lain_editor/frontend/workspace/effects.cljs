@@ -179,6 +179,25 @@
                               (reset! s/message "Block closed · remaining sessions preserved")
                               (dom/focus-pane! @s/selected-id)))))))
 
+(defn detach-session! [id]
+  (let [pane (model/pane @s/workspace id)]
+    (when (and pane (get @s/generations id)
+               (or (not (model/draft-edits? pane))
+                   (js/confirm "Detach running session and discard draft edits? Only executed source and extensions are retained.")))
+      (operation!
+       id
+       #(let [generation (get @s/generations id)]
+          (-> (api! {:op "detach-session" :pane id :generation generation})
+              (.then (fn [_]
+                       (s/transact!
+                        (fn []
+                          (swap! s/workspace model/detach-pane id (model/new-pane))
+                          (doseq [cell [s/generations s/errors s/results s/expansions s/refreshes]]
+                            (swap! cell dissoc id))
+                          (swap! s/remote update :development dissoc id)
+                          (reset! s/message "Session detached · runtime continues running")))
+                       (dom/focus-pane! @s/selected-id)))))))))
+
 (defn reopen-closed-block! [archive-id]
   (when-not @s/busy?
     (let [fresh-id (str (random-uuid))
@@ -284,6 +303,7 @@
       :spawn (add-pane! target nil)
       :spawn-slot (spawn-slots! target)
       :close (close-pane! target)
+      :detach-session (detach-session! target)
       :reopen-closed (reopen-closed-block! archive)
       (:value :cell :graph) (s/set-display! target :mode (name action))
       (:upstream :downstream :both) (s/set-display! target :direction (name action))

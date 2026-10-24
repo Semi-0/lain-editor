@@ -9,6 +9,19 @@
   {:format "lain-tiled-editor" :version 1 :panes [(model/new-pane "a")]
    :layout {:type "pane" :id "a"}})
 
+(deftest detaching-removes-drafts-without-creating-a-closed-block
+  (let [doc (workspace/upgrade (document))
+        detached (model/detach-pane doc "a" (model/new-pane "replacement"))
+        split (model/split-pane doc "a" "row" (model/new-pane "b"))]
+    (is (= detached (workspace/validate detached)))
+    (is (= ["replacement"] (mapv :id (:panes detached))))
+    (is (= (:closedBlocks doc) (:closedBlocks detached)))
+    (is (= ["b"] (mapv :id (:panes (model/detach-pane split "a" (model/new-pane "unused"))))))
+    (is (false? (model/draft-edits? (assoc (model/new-pane "a") :executedSource ""))))
+    (doseq [change [{:source "draft"} {:extensionDraft "draft"}
+                    {:extensions ["executed"] :extensionEdits ["edited"]}]]
+      (is (model/draft-edits? (merge (model/new-pane "a") {:executedSource ""} change))))))
+
 (deftest development-transition-declares-effects-and-separates-portable-state
   (let [client "test-client"
         portable (development-protocol/portable-model

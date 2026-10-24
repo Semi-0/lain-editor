@@ -105,3 +105,13 @@
           selected (filter #(get-in % [1 :selected]) (elements control :option))]
       (is (= mode (get-in control [1 :value])))
       (is (= [mode] (mapv #(get-in % [1 :value]) selected))))))
+
+(deftest session-picker-distinguishes-empty-and-filtered-lists
+  (let [vm (-> (render-input "")
+               (assoc-in [:palette :view] :sessions)
+               (assoc-in [:palette :heading] "Reopen running session")
+               (assoc-in [:palette :commands] []))]
+    (is (some? (element-with-label (palette/view vm) :input "Search sessions")))
+    (is (str/includes? (html/render (palette/view vm)) "No detached sessions"))
+    (is (str/includes? (html/render (palette/view (assoc-in vm [:palette :commands] [{:label "session"}])))
+                       "No matching sessions"))))

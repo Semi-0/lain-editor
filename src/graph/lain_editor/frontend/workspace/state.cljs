@@ -66,9 +66,12 @@
         selected (desktops/selected-id document)
         authoritative-ui (dissoc (:ui app) :tick)
         observed (:remote app)
-        commands (into (model/commands document (get-in authoritative-ui [:palette :target])
+        commands (if (= :sessions (get-in authoritative-ui [:palette :view]))
+                   (mapv #(assoc % :enabled (not (:busy? authoritative-ui)))
+                         (get-in authoritative-ui [:palette :commands]))
+                   (into (model/commands document (get-in authoritative-ui [:palette :target])
                                         (:generations observed) (:busy? authoritative-ui))
-                       (model/desktop-commands document (:busy? authoritative-ui)))
+                         (model/desktop-commands document (:busy? authoritative-ui))))
         pane-views (reduce (fn [views pane]
                              (assoc-in views [(:id pane) :development]
                                        (development/view-model (development-state app (:id pane)))))

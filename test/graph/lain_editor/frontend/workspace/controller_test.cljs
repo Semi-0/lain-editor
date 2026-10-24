@@ -155,3 +155,60 @@
       (dispose-new)
       (is (thrown? js/Error (events/dispatch! [:replacement-test/run])))
       (finally (dispose-old) (dispose-new)))))
+
+(deftest detach-keeps-local-state-until-success-and-never-closes
+  (async done
+    (let [before @s/source fetch (.-fetch js/globalThis)
+          document (model/initial-workspace) id (:id (first (:panes document)))
+          calls (atom []) pending (atom nil)
+          response! (fn [body]
+                      (@pending #js {:json #(js/Promise.resolve (clj->js body))}))]
+      (reset! s/source (s/initial (model/update-pane document id assoc :executedSource "")))
+      (reset! s/generations {id "generation"})
+      (set! (.-fetch js/globalThis)
+            (fn [_ options]
+              (swap! calls conj (js->clj (js/JSON.parse (.-body options)) :keywordize-keys true))
+              (js/Promise. (fn [resolve _] (reset! pending resolve)))))
+      (let [failed (effects/detach-session! id)]
+        (-> (js/Promise.resolve nil)
+            (.then (fn [_]
+                     (is (some? (model/pane @s/workspace id)))
+                     (response! {:ok false :error "Session disappeared"})
+                     failed))
+            (.then (fn [_]
+                     (is (some? (model/pane @s/workspace id)))
+                     (is (= "generation" (get @s/generations id)))
+                     (is (= "Session disappeared" (get @s/errors id)))
+                     (let [detaching (effects/detach-session! id)]
+                       (-> (js/Promise.resolve nil)
+                           (.then (fn [_]
+                                    (response! {:ok true :result {}})
+                                    detaching))))))
+            (.then (fn [_]
+                     (is (nil? (model/pane @s/workspace id)))
+                     (is (nil? (get @s/generations id)))
+                     (is (empty? (:closedBlocks @s/workspace)))
+                     (is (= [{:op "detach-session" :pane id :generation "generation"}
+                             {:op "detach-session" :pane id :generation "generation"}] @calls))))
+            (.catch (fn [error] (is false (str error))))
+            (.finally (fn []
+                        (set! (.-fetch js/globalThis) fetch)
+                        (reset! s/source before)
+                        (done))))))))
+
+(deftest cancelling-draft-discard-does-not-detach
+  (let [before @s/source confirm (aget js/globalThis "confirm")
+        document (model/initial-workspace) id (:id (first (:panes document)))
+        warnings (atom [])]
+    (try
+      (reset! s/source (s/initial (model/update-pane document id assoc
+                                                  :source "edited" :executedSource "executed")))
+      (reset! s/generations {id "generation"})
+      (aset js/globalThis "confirm" (fn [message] (swap! warnings conj message) false))
+      (let [unchanged @s/source]
+        (is (nil? (effects/detach-session! id)))
+        (is (= unchanged @s/source))
+        (is (= 1 (count @warnings))))
+      (finally
+        (aset js/globalThis "confirm" confirm)
+        (reset! s/source before)))))
