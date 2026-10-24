@@ -34,6 +34,7 @@
 (defonce busy? (ui-cell :busy?))
 (defonce pending-id (ui-cell :pending-id))
 (defonce generations (remote-cell :generations))
+(defonce session-ids (remote-cell :session-ids))
 (defonce errors (remote-cell :errors))
 (defonce results (remote-cell :results))
 (defonce expansions (ui-cell :expansions))

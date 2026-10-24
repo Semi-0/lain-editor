@@ -196,6 +196,65 @@
                         (reset! s/source before)
                         (done))))))))
 
+(deftest reopen-and-stop-use-live-session-api-with-atomic-local-updates
+  (async done
+    (let [before @s/source fetch (.-fetch js/globalThis)
+          document (model/initial-workspace) calls (atom [])
+          reply (atom {:ok true :result {:sessions []}})
+          result {:sessionId "live" :generation "original" :source "(display 42)"
+                  :extensions ["(define extra 9)"] :displayMode "value"}]
+      (reset! s/source (s/initial document))
+      (set! (.-fetch js/globalThis)
+            (fn [_ options]
+              (swap! calls conj (js->clj (js/JSON.parse (.-body options)) :keywordize-keys true))
+              (js/Promise.resolve #js {:status (if (:ok @reply) 200 400) :ok (:ok @reply)
+                                        :json #(js/Promise.resolve (clj->js @reply))})))
+      (-> (effects/pick-session! :reopen-running)
+          (.then (fn [_]
+                   (is (= :sessions (:view @s/palette)))
+                   (is (empty? (:visible-commands (s/snapshot @s/source))))
+                   (reset! reply {:ok true :result {:sessions [{:sessionId "live" :pane "old-pane"
+                                                              :source "(display 42)" :extensions []}]}})
+                   (effects/pick-session! :reopen-running)))
+          (.then (fn [_]
+                   (swap! s/palette assoc :query "old-pane 42 live")
+                   (is (= 1 (count (:visible-commands (s/snapshot @s/source)))))
+                   (swap! s/palette assoc :query "missing")
+                   (is (empty? (:visible-commands (s/snapshot @s/source))))
+                   (reset! reply {:ok false :error "Detached session not found or already attached"})
+                   (effects/reopen-session! "live")))
+          (.then (fn [_]
+                   (is (= document @s/workspace))
+                   (is (= "Detached session not found or already attached" @s/message))
+                   (reset! reply {:ok true :result result})
+                   (effects/reopen-session! "live")))
+          (.then (fn [_]
+                   (let [id @s/selected-id p (model/pane @s/workspace id)]
+                     (is (not= id (:id (first (:panes document)))))
+                     (is (= (:source result) (:source p) (:executedSource p)))
+                     (is (= (:extensions result) (:extensions p)))
+                     (is (= "original" (get @s/generations id)))
+                     (is (= "live" (get @s/session-ids id)))
+                     (is (= "@display" (get-in p [:display :cell])))
+                     (is (= 1 (get @s/refreshes id))))
+                   (reset! reply {:ok false :error "Session disappeared"})
+                   (effects/stop-session! "gone")))
+          (.then (fn [_]
+                   (is (= "Session disappeared" @s/message))
+                   (is (= 2 (count (:panes @s/workspace))))
+                   (reset! reply {:ok true :result {:stopped "other"}})
+                   (effects/stop-session! "other")))
+          (.then (fn [_]
+                   (is (= "Detached session stopped" @s/message))
+                   (is (= ["list-sessions" "list-sessions" "reopen-session" "reopen-session"
+                           "stop-session" "stop-session"] (mapv :op @calls)))
+                   (is (= "live" (:sessionId (nth @calls 3))))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally (fn []
+                      (set! (.-fetch js/globalThis) fetch)
+                      (reset! s/source before)
+                      (done)))))))
+
 (deftest cancelling-draft-discard-does-not-detach
   (let [before @s/source confirm (aget js/globalThis "confirm")
         document (model/initial-workspace) id (:id (first (:panes document)))

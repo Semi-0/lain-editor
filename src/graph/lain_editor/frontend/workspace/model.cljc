@@ -208,6 +208,7 @@
    [:split-row "Split side by side"] [:split-column "Split stacked"]
    [:spawn "Spawn new block"] [:spawn-slot "Spawn slot"] [:close "Close block"]
    [:detach-session "Detach running session"]
+   [:reopen-session "Reopen running session"] [:stop-session "Stop detached session"]
    [:value "Show value"] [:cell "Show cell details"] [:graph "Show topology"]
    [:upstream "Trace upstream"] [:downstream "Trace downstream"] [:both "Trace both directions"]
    [:toggle-fullscreen "Toggle fullscreen visualizer"]
@@ -229,6 +230,7 @@
                             (case action
                               :detach-session (and (contains? generations id)
                                                    (some? (:executedSource p)))
+                              :reopen-session (< (count (:panes document)) 64)
                               :close (and (> (count (desktops/pane-ids document)) 1)
                                           (< (count (get document :closedBlocks []))
                                              workspace/archive-capacity))
@@ -259,3 +261,13 @@
   (let [words (remove str/blank? (str/split (str/lower-case (str/trim query)) #"\s+"))]
     (filterv (fn [command]
                (every? #(str/includes? (str/lower-case (:label command)) %) words)) commands)))
+
+(defn session-commands [sessions action]
+  (mapv (fn [{:keys [pane source sessionId]}]
+          {:action action :session sessionId :enabled true
+           :label (str pane " · " (subs source 0 (min 100 (count source))) " · " sessionId)})
+        sessions))
+
+(defn reopened-pane [id {:keys [source extensions displayMode]}]
+  (let [pane (committed-source (assoc (new-pane id) :source source) source extensions)]
+    (if displayMode (layers/program-output pane displayMode) pane)))

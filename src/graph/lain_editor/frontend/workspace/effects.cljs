@@ -49,7 +49,8 @@
   ([command] (api! command nil))
   ([command signal]
    (let [id (str (random-uuid)) epoch (:epoch @transport)
-         pane (:pane command) generation (get @s/generations pane)
+         pane (when-not (= "reopen-session" (:op command)) (:pane command))
+         generation (get @s/generations pane)
          controller (when-not signal (js/AbortController.))
          signal (or signal (.-signal controller))]
      (swap! transport assoc-in [:controllers id] controller)
@@ -57,7 +58,7 @@
                                :headers #js {"Content-Type" "application/json"}
                                :body (js/JSON.stringify (clj->js command))})
          (.then (fn [response]
-                  (if (false? (.-ok response))
+                  (if (and (false? (.-ok response)) (not= 400 (.-status response)))
                     (throw (js/Error. (str "Editor HTTP " (.-status response))))
                     (.json response))))
          (.then (fn [body]
@@ -111,6 +112,7 @@
                       (swap! s/errors dissoc id)
                       (swap! s/expansions dissoc id)
                       (swap! s/generations assoc id (:generation result))
+                      (swap! s/session-ids assoc id (:sessionId result))
                       (reset! s/message "Runtime updated · each block has an independent session"))))))))))
 
 (defn spawn-slots! [id]
@@ -144,6 +146,7 @@
              (.then (fn [result]
                       (s/transact! (fn []
                        (reset! s/results {}) (reset! s/errors {}) (reset! s/expansions {})
+                       (reset! s/session-ids {})
                        (swap! s/remote assoc :development {} :topology {})
                        (swap! s/ui (fn [ui] (-> ui (assoc :panes-ui {}) (update :workspace-revision (fnil inc 0)))))
                        (reset! s/workspace
@@ -174,7 +177,7 @@
                               (s/transact! (fn []
                                (reset! s/workspace next-document)
                                (reset! s/selected-id (desktops/selected-id next-document))
-                               (doseq [cell [s/generations s/errors s/results s/expansions s/refreshes]]
+                               (doseq [cell [s/generations s/session-ids s/errors s/results s/expansions s/refreshes]]
                                  (swap! cell dissoc id))))
                               (reset! s/message "Block closed · remaining sessions preserved")
                               (dom/focus-pane! @s/selected-id)))))))
@@ -192,11 +195,47 @@
                        (s/transact!
                         (fn []
                           (swap! s/workspace model/detach-pane id (model/new-pane))
-                          (doseq [cell [s/generations s/errors s/results s/expansions s/refreshes]]
+                          (doseq [cell [s/generations s/session-ids s/errors s/results s/expansions s/refreshes]]
                             (swap! cell dissoc id))
                           (swap! s/remote update :development dissoc id)
                           (reset! s/message "Session detached · runtime continues running")))
                        (dom/focus-pane! @s/selected-id)))))))))
+
+(defn pick-session! [action]
+  (operation!
+   nil
+   #(-> (api! {:op "list-sessions"})
+        (.then (fn [{:keys [sessions]}]
+                 (reset! s/palette {:open? true :view :sessions
+                                   :heading (if (= :reopen-running action)
+                                              "Reopen running session" "Stop detached session")
+                                   :commands (model/session-commands sessions action)
+                                   :query "" :active 0}))))))
+
+(defn reopen-session! [session-id]
+  (let [id (str (random-uuid))]
+    (operation!
+     nil
+     #(do
+        (when (>= (count (:panes @s/workspace)) 64)
+          (throw (js/Error. "Workspace has 64 panes")))
+        (-> (api! {:op "reopen-session" :sessionId session-id :pane id})
+            (.then (fn [result]
+                     (s/transact!
+                      (fn []
+                        (swap! s/workspace model/spawn-pane (model/reopened-pane id result))
+                        (swap! s/generations assoc id (:generation result))
+                        (swap! s/session-ids assoc id (:sessionId result))
+                        (s/select-pane! id)
+                        (s/refresh! id)
+                        (reset! s/message "Session reopened · live runtime preserved")))
+                     (dom/focus-pane! id))))))))
+
+(defn stop-session! [session-id]
+  (operation!
+   nil
+   #(-> (api! {:op "stop-session" :sessionId session-id})
+        (.then (fn [_] (reset! s/message "Detached session stopped"))))))
 
 (defn reopen-closed-block! [archive-id]
   (when-not @s/busy?
@@ -287,7 +326,7 @@
   (swap! s/ui update-in [:panes-ui id :presentation]
          #(if (= mode %) :normal mode)))
 
-(defn perform! [{:keys [action target archive enabled]}]
+(defn perform! [{:keys [action target archive session enabled]}]
   (when enabled
     (case action
       :new-workspace (restore! (model/initial-workspace) {:workspace-path nil})
@@ -304,6 +343,10 @@
       :spawn-slot (spawn-slots! target)
       :close (close-pane! target)
       :detach-session (detach-session! target)
+      :reopen-session (pick-session! :reopen-running)
+      :stop-session (pick-session! :stop-running)
+      :reopen-running (reopen-session! session)
+      :stop-running (stop-session! session)
       :reopen-closed (reopen-closed-block! archive)
       (:value :cell :graph) (s/set-display! target :mode (name action))
       (:upstream :downstream :both) (s/set-display! target :direction (name action))
