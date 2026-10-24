@@ -1,0 +1,144 @@
+{
+  "format": "lain-tiled-editor",
+  "version": 2,
+  "panes": [
+    {
+      "id": "amb-search",
+      "title": "Learned no-goods",
+      "filename": "search.lain",
+      "source": "(load-primitive-environment\n  \"examples/lain/amb/web_editor.clj\"\n  :examples.lain.amb.web-editor/primitive-bindings)\n\n;; Add (-> (list 1 2) domain) with Extend to start this search.\n(def-cells domain repairs decision)\n(define chosen (amb domain repairs decision))\n(define decisions (list decision))\n(define valid (= chosen 2))\n(define failure (require valid))\n(define knowledge (learn failure decisions))\n(-> (backtrack decisions knowledge) repairs)\n(define learning (amb:learning-view knowledge))\n(display learning)\n",
+      "executedSource": "(load-primitive-environment\n  \"examples/lain/amb/web_editor.clj\"\n  :examples.lain.amb.web-editor/primitive-bindings)\n\n;; Add (-> (list 1 2) domain) with Extend to start this search.\n(def-cells domain repairs decision)\n(define chosen (amb domain repairs decision))\n(define decisions (list decision))\n(define valid (= chosen 2))\n(define failure (require valid))\n(define knowledge (learn failure decisions))\n(-> (backtrack decisions knowledge) repairs)\n(define learning (amb:learning-view knowledge))\n(display learning)\n",
+      "extensions": [
+        "(-> (list 1 2) domain)"
+      ],
+      "extensionDraft": "",
+      "outputRatio": 0.6,
+      "display": {
+        "cell": "@display",
+        "mode": "value",
+        "direction": "both"
+      },
+      "layerMode": "stack",
+      "layers": [
+        {
+          "id": "code",
+          "visible": true
+        },
+        {
+          "id": "result",
+          "visible": true
+        },
+        {
+          "id": "topology",
+          "visible": false
+        },
+        {
+          "id": "cell",
+          "visible": false
+        }
+      ]
+    },
+    {
+      "id": "amb-exhausted",
+      "title": "Exhausted search",
+      "filename": "exhausted.lain",
+      "source": "(load-primitive-environment\n  \"examples/lain/amb/web_editor.clj\"\n  :examples.lain.amb.web-editor/primitive-bindings)\n\n(def-cells domain repairs decision)\n(define chosen (amb domain repairs decision))\n(define decisions (list decision))\n(define valid (= chosen 3))\n(define failure (require valid))\n(define knowledge (learn failure decisions))\n(-> (backtrack decisions knowledge) repairs)\n(define learning (amb:learning-view knowledge))\n(display learning)\n",
+      "executedSource": "(load-primitive-environment\n  \"examples/lain/amb/web_editor.clj\"\n  :examples.lain.amb.web-editor/primitive-bindings)\n\n(def-cells domain repairs decision)\n(define chosen (amb domain repairs decision))\n(define decisions (list decision))\n(define valid (= chosen 3))\n(define failure (require valid))\n(define knowledge (learn failure decisions))\n(-> (backtrack decisions knowledge) repairs)\n(define learning (amb:learning-view knowledge))\n(display learning)\n",
+      "extensions": [
+        "(-> (list 1 2) domain)"
+      ],
+      "extensionDraft": "",
+      "outputRatio": 0.6,
+      "display": {
+        "cell": "@display",
+        "mode": "value",
+        "direction": "both"
+      },
+      "layerMode": "stack",
+      "layers": [
+        {
+          "id": "code",
+          "visible": true
+        },
+        {
+          "id": "result",
+          "visible": true
+        },
+        {
+          "id": "topology",
+          "visible": false
+        },
+        {
+          "id": "cell",
+          "visible": false
+        }
+      ]
+    },
+    {
+      "id": "amb-replay",
+      "title": "Published learning replay",
+      "filename": "replay.lain",
+      "source": "(load-primitive-environment\n  \"examples/lain/amb/web_editor.clj\"\n  :examples.lain.amb.web-editor/primitive-bindings)\n(load-lain \"examples/lain/network_replay/collect-history.lain\")\n\n;; The existing recorder accumulates published semantic graphs and their values.\n;; It does not claim to capture every internal learning operation.\n(def-cells domain repairs decision)\n(define chosen (amb domain repairs decision))\n(define decisions (list decision))\n(define valid (= chosen 2))\n(define failure (require valid))\n(define knowledge (learn failure decisions))\n(-> (backtrack decisions knowledge) repairs)\n(define learning (amb:learning-view knowledge))\n(display (collect-semantic-history learning 0 600000))\n",
+      "executedSource": "(load-primitive-environment\n  \"examples/lain/amb/web_editor.clj\"\n  :examples.lain.amb.web-editor/primitive-bindings)\n(load-lain \"examples/lain/network_replay/collect-history.lain\")\n\n;; The existing recorder accumulates published semantic graphs and their values.\n;; It does not claim to capture every internal learning operation.\n(def-cells domain repairs decision)\n(define chosen (amb domain repairs decision))\n(define decisions (list decision))\n(define valid (= chosen 2))\n(define failure (require valid))\n(define knowledge (learn failure decisions))\n(-> (backtrack decisions knowledge) repairs)\n(define learning (amb:learning-view knowledge))\n(display (collect-semantic-history learning 0 600000))\n",
+      "extensions": [
+        "(-> (list 1 2) domain)"
+      ],
+      "extensionDraft": "",
+      "outputRatio": 0.6,
+      "display": {
+        "cell": "@display",
+        "mode": "graph",
+        "direction": "both"
+      },
+      "layerMode": "stack",
+      "layers": [
+        {
+          "id": "code",
+          "visible": true
+        },
+        {
+          "id": "result",
+          "visible": false
+        },
+        {
+          "id": "topology",
+          "visible": true
+        },
+        {
+          "id": "cell",
+          "visible": false
+        }
+      ]
+    }
+  ],
+  "activeDesktop": "amb-desktop-1",
+  "desktops": [
+    {
+      "id": "amb-desktop-1",
+      "name": "1",
+      "selectedPane": "amb-search",
+      "layout": {
+        "type": "pane",
+        "id": "amb-search"
+      }
+    },
+    {
+      "id": "amb-desktop-2",
+      "name": "2",
+      "selectedPane": "amb-exhausted",
+      "layout": {
+        "type": "pane",
+        "id": "amb-exhausted"
+      }
+    },
+    {
+      "id": "amb-desktop-3",
+      "name": "3",
+      "selectedPane": "amb-replay",
+      "layout": {
+        "type": "pane",
+        "id": "amb-replay"
+      }
+    }
+  ]
+}

@@ -1,6 +1,5 @@
 (ns graph.lain-editor.frontend.workspace.status-error-test
   (:require [cljs.test :refer-macros [async deftest is]]
-            [javelin.core :refer-macros [dosync]]
             [graph.lain-editor.frontend.workspace.effects :as effects]
             [graph.lain-editor.frontend.workspace.model :as model]
             [graph.lain-editor.frontend.workspace.state :as s]))
@@ -23,12 +22,12 @@
                      #js {:json (fn [] (js/Promise.resolve
                                         (clj->js (if error {:ok false :error error}
                                                      {:ok true :result {:generation "new-generation"}}))))}))]
-      (dosync
+      (s/transact! (fn []
        (reset! s/workspace document) (reset! s/selected-id id)
        (reset! s/busy? false) (reset! s/pending-id nil)
        (reset! s/generations {id "good-generation" "neighbor" "neighbor-generation"})
        (reset! s/errors {}) (reset! s/results {id {:response :last-good}})
-       (reset! s/expansions {}) (reset! s/message "Runtime updated"))
+       (reset! s/expansions {}) (reset! s/message "Runtime updated")))
       (set! (.-fetch js/globalThis)
             (fn [_ options]
               (let [command (js->clj (js/JSON.parse (.-body options)) :keywordize-keys true)
@@ -81,5 +80,5 @@
           (.catch (fn [error] (is false (str "Unexpected failure: " error))))
           (.finally (fn []
                       (set! (.-fetch js/globalThis) fetch)
-                      (dosync (doseq [[cell value] (map vector cells before)] (reset! cell value)))
+                      (s/transact! (fn [] (doseq [[cell value] (map vector cells before)] (reset! cell value))))
                       (done)))))))

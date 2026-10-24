@@ -1,35 +1,20 @@
 (ns graph.lain-editor.frontend.workspace.extension-editors
-  "Applied extensions stay editable in their pane's code layer."
+  "Pure, keyed editors for applied extensions."
   (:require [clojure.string :as str]
-            [graph.lain-editor.frontend.ui.dom :as dom]
-            [graph.lain-editor.frontend.workspace.model :as model]
-            [graph.lain-editor.frontend.ui.reactive :as rx]
-            [graph.lain-editor.frontend.workspace.state :as s]))
+            [graph.lain-editor.frontend.workspace.model :as model]))
 
-(defn- editor [id index _source]
-  (let [section (dom/element "div" "applied-extension")
-        title (str "Extension " (inc index))
-        code (dom/element "textarea" "code")]
-    (.setAttribute code "aria-label" (str title " code"))
-    (set! (.-spellcheck code) false)
-    (set! (.-readOnly code) @s/busy?)
-    (set! (.-oninput code) #(s/change-pane! id model/edit-extension index (.. % -target -value)))
-    (dom/append! section (dom/element "div" "extension-heading" title) code)
-    {:section section :code code}))
+(defn source-rows [source]
+  (max 2 (inc (count (str/split-lines (str/trimr source))))))
 
-(defn mount! [scope id descriptor]
-  (let [container (dom/element "div" "applied-extensions") editors (atom [])]
-    (rx/watch! scope descriptor
-      (fn [pane]
-        (let [sources (model/extension-sources pane)]
-          (if (= (count sources) (count @editors))
-            nil
-            (let [next (mapv (partial editor id) (range) sources)]
-              (apply dom/replace! container (map :section next))
-              (reset! editors next)))
-          (doseq [[{:keys [code]} source] (map vector @editors sources)]
-            (dom/value! code source)
-            (set! (.-rows code) (max 2 (inc (count (str/split-lines (str/trimr source))))))))))
-    (rx/watch! scope s/busy?
-      (fn [busy?] (doseq [{:keys [code]} @editors] (set! (.-readOnly code) busy?))))
-    container))
+(defn view [pane busy?]
+  (into [:div.applied-extensions]
+        (map-indexed
+         (fn [index source]
+           [:div.applied-extension {:replicant/key [(:id pane) :extension index]}
+            [:div.extension-heading (str "Extension " (inc index))]
+            [:textarea.code
+             {:replicant/key [(:id pane) :extension-code index]
+              :aria-label (str "Extension " (inc index) " code")
+              :spellcheck false :readonly busy? :rows (source-rows source) :value source
+              :on {:input [[:workspace/edit-extension (:id pane) index [:event/target.value]]]}}]])
+         (model/extension-sources pane))))

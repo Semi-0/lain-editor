@@ -1,45 +1,40 @@
 (ns graph.lain-editor.frontend.ui.fullscreen
-  "Fullscreen presentation shell. Mounted graph and replay children are never replaced."
-  (:require [graph.lain-editor.frontend.ui.dom :as dom]
-            [graph.lain-editor.frontend.ui.reactive :as rx]))
+  "Browser fullscreen effects over Replicant-owned nodes; never renders or replaces children."
+  (:require [graph.lain-editor.frontend.ui.reactive :as rx]))
 
-(defn shell!
-  [scope host document {:keys [label on-change] :or {label "topology"}}]
-   (let [root (dom/element "div" "topology-fullscreen-shell")
-         body (dom/element "div" "topology-content topology-fullscreen-content")
-         status (dom/element "span" "fullscreen-status")
-         alive? (atom true)
-         active? #(identical? root (or (.-fullscreenElement document)
-                                      (.-webkitFullscreenElement document)))
-         report! #(when @alive? (dom/text! status (or (.-message %) (str %))))
-         invoke! (fn [operation]
-                   (dom/text! status "")
-                   (try
-                     (-> (js/Promise.resolve (operation)) (.catch report!))
-                     (catch :default error (report! error))))
-         leave! #(invoke! (fn []
-                            (cond
-                              (fn? (.-exitFullscreen document)) (.exitFullscreen document)
-                              (fn? (.-webkitExitFullscreen document)) (.webkitExitFullscreen document)
-                              :else (throw (js/Error. "Fullscreen exit is unavailable")))))
-         enter! #(invoke! (fn []
-                            (cond
-                              (fn? (.-requestFullscreen root)) (.requestFullscreen root)
-                              (fn? (.-webkitRequestFullscreen root)) (.webkitRequestFullscreen root)
-                              :else (throw (js/Error. "Fullscreen is unavailable in this browser")))))
-         toggle! #(if (active?) (leave!) (enter!))
-         sync! (fn [_]
-                 (when on-change (on-change (active?))))]
-     (.setAttribute status "role" "status")
-     (.setAttribute status "aria-label" (str "Fullscreen " label " status"))
-     (dom/append! root status body)
-     (dom/append! host root)
-     (dom/listen! scope document "fullscreenchange" sync!)
-     (dom/listen! scope document "webkitfullscreenchange" sync!)
-     (sync! nil)
-     (rx/own! scope #(do (reset! alive? false) (when (active?) (leave!))))
-     {:body body :root root :status status :toggle! toggle! :active? active?}))
+(defn active? [document element]
+  (identical? element (or (.-fullscreenElement document) (.-webkitFullscreenElement document))))
 
-(defn mount!
-  ([scope host] (mount! scope host js/document))
-  ([scope host document] (:body (shell! scope host document {}))))
+(defn exit! [document]
+  (cond
+    (fn? (.-exitFullscreen document)) (.exitFullscreen document)
+    (fn? (.-webkitExitFullscreen document)) (.webkitExitFullscreen document)
+    :else (throw (js/Error. "Fullscreen exit is unavailable"))))
+
+(defn toggle! [document element report!]
+  (try
+    (-> (js/Promise.resolve
+         (if (active? document element)
+           (exit! document)
+           (cond
+             (fn? (.-requestFullscreen element)) (.requestFullscreen element)
+             (fn? (.-webkitRequestFullscreen element)) (.webkitRequestFullscreen element)
+             :else (throw (js/Error. "Fullscreen is unavailable in this browser")))))
+        (.catch #(report! (.-message %))))
+    (catch :default error
+      (report! (.-message error))
+      (js/Promise.resolve nil))))
+
+(defn observe! [owner document element changed! report!]
+  (let [alive? (atom true)
+        sync! (fn [_] (when @alive? (changed! (active? document element))))]
+    (doseq [event ["fullscreenchange" "webkitfullscreenchange"]]
+      (.addEventListener document event sync!)
+      (rx/own! owner #(.removeEventListener document event sync!)))
+    (sync! nil)
+    (rx/own! owner
+             #(do (reset! alive? false)
+                  (when (active? document element)
+                    (try
+                      (-> (js/Promise.resolve (exit! document)) (.catch (fn [error] (report! (.-message error)))))
+                      (catch :default error (report! (.-message error)))))))))

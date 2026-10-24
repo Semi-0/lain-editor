@@ -4,7 +4,9 @@
             [graph.lain-editor.frontend.ui.reactive :as rx]
             [graph.lain-editor.frontend.workspace.state :as s]))
 
-(defn attach! [scope id request]
+(defn attach!
+  ([scope id request] (attach! scope id request effects/api!))
+  ([scope id request api!]
   (let [active (atom nil) alive? (atom true)
         cancel! (fn []
                   (when-let [controller (:controller @active)] (.abort controller))
@@ -14,7 +16,7 @@
                 (let [token (random-uuid) controller (js/AbortController.)
                       current? #(and @alive? (= token (:token @active)) (= value @request))]
                   (reset! active {:token token :controller controller})
-                  (-> (effects/api! (assoc (dissoc value :refresh) :op "inspect") (.-signal controller))
+                  (-> (api! (assoc (dissoc value :refresh) :op "inspect") (.-signal controller))
                       (.then (fn [response]
                                (when (current?)
                                  (swap! s/results assoc id {:request value :response response}))))
@@ -25,4 +27,4 @@
                                   (when (= token (:token @active)) (reset! active nil))))))))]
       (rx/watch! scope request (fn [value] (cancel!) (start! value)))
       (rx/watch! scope s/tick (fn [_] (start! @request)))
-      (rx/own! scope #(do (reset! alive? false) (cancel!))))))
+      (rx/own! scope #(do (reset! alive? false) (cancel!)))))))

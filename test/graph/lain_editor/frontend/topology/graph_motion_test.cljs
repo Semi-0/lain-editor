@@ -55,72 +55,14 @@
     (is (= target (:target plan)))
     (is (not (contains? plan :view)))))
 
-(deftest incoming-layouts-respect-only-the-currently-held-anchor
-  (let [media (aget js/global "matchMedia")
-        scope (rx/scope) held (atom "a")
-        points (rx/input! scope {"a" {:x 30 :y 40 :width 28 :height 24}})
-        layout (rx/input! scope {})
-        canvas #js {:setAttribute (fn [_ _])}
-        constrain (fn [incoming]
-                    (if-let [id @held]
-                      (assoc incoming id (get @points id))
-                      incoming))
-        result {:nodes [{:id "a" :position [100 200] :size [28 24]}]}]
-    (try
-      (aset js/global "matchMedia" (fn [_] #js {:matches true}))
-      (let [animation (motion/mount! scope canvas points layout constrain)]
-        ((:play! animation) result false)
-        (is (= [30 40] ((juxt :x :y) (get @points "a"))))
-        (reset! held nil)
-        ((:play! animation) result false)
-        (is (= [100 200] ((juxt :x :y) (get @points "a")))))
-      (finally (rx/dispose! scope) (aset js/global "matchMedia" media)))))
-
-(deftest motion-finishes-and-cancels-owned-animation-frames
-  (let [raf (aget js/global "requestAnimationFrame") cancel (aget js/global "cancelAnimationFrame")
-        media (aget js/global "matchMedia") pending (atom {}) canceled (atom []) counter (atom 0)
-        reduced (atom false) attrs (atom {}) scope (rx/scope)
-        canvas #js {:style #js {} :setAttribute (fn [key value] (swap! attrs assoc key value))}
-        node (fn [x] {:id "a" :position [x 0] :size [28 24]})
-        camera {:x -57 :y 83 :width 300 :height 200 :scale 0.25}
-        points (rx/input! scope {}) view (rx/input! scope camera)
-        layout (rx/input! scope {}) result {:nodes [(node 100)] :iterationsUsed 10
-                                            :frames [{:iteration 0 :nodes [(node 0)]}
-                                                     {:iteration 10 :nodes [(node 100)]}]}]
-    (try
-      (aset js/global "requestAnimationFrame" (fn [f] (let [id (swap! counter inc)] (swap! pending assoc id (fn [time] (swap! pending dissoc id) (f time))) id)))
-      (aset js/global "cancelAnimationFrame" (fn [id] (swap! canceled conj id) (swap! pending dissoc id)))
-      (aset js/global "matchMedia" (fn [_] #js {:matches @reduced}))
-      (let [motion (motion/mount! scope canvas points layout)]
-        ((:play! motion) result true)
-        (is ((:active? motion))) (is (= 1 (count @pending)))
-        ((first (vals @pending)) 0)
-        (is ((:active? motion))) (is (= 1 (count @pending)))
-        ((:finish! motion))
-        (is (not ((:active? motion)))) (is (= "settled" (get @attrs "data-layout-phase")))
-        (is (= (motion/point-map (:nodes result)) @points))
-        (is (= camera @view) "Finishing a layout must preserve pan and zoom")
-        (is (nil? (get @attrs "viewBox")))
-        (is (nil? (.. canvas -style -width)))
-        (is (nil? (.. canvas -style -height)))
-        ((:play! motion) (assoc result :nodes [(node 250)]) false)
-        (is (= 250 (get-in @points ["a" :x])) "Drag responses still update solver positions")
-        (is (= camera @view) "Nonanimated drag responses must not reframe")
-        (is (nil? (get @attrs "viewBox")))
-        ((:play! motion) result true)
-        (rx/dispose! scope)
-        (is (empty? @pending)) (is (= 2 (count @canceled))))
-      (let [scope (rx/scope) points (rx/input! scope {}) layout (rx/input! scope {})]
-        (reset! reduced true)
-        (let [motion (motion/mount! scope canvas points layout)]
-          ((:play! motion) result true)
-          (is (not ((:active? motion)))) (is (empty? @pending))
-          (is (= (motion/point-map (:nodes result)) @points)))
-        (rx/dispose! scope))
-      (finally
-        (rx/dispose! scope)
-        (aset js/global "requestAnimationFrame" raf) (aset js/global "cancelAnimationFrame" cancel)
-        (aset js/global "matchMedia" media)))))
+(deftest dragging-holds-only-the-current-anchor
+  (let [points {"a" {:x 30 :y 40 :width 28 :height 24}
+                "b" {:x 30 :y 40 :width 28 :height 24}}
+        held (viewport/clear-points points "a")
+        incoming {"a" {:x 100 :y 200 :width 28 :height 24}
+                  "b" {:x 300 :y 400 :width 28 :height 24}}]
+    (is (= (get points "a") (get held "a")))
+    (is (= incoming (viewport/clear-points incoming)) "After release, incoming coordinates have no retained pin")))
 
 (deftest node-flash-restarts-only-its-owned-effects-and-disposes-them
   (let [media (aget js/global "matchMedia") computed (aget js/global "getComputedStyle")

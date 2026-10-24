@@ -1,6 +1,6 @@
 (ns graph.lain-editor.workspace.layers-test
   (:require #?(:clj [clojure.test :refer [deftest is]] :cljs [cljs.test :refer-macros [deftest is]])
-            #?(:clj [graph.json :as json])
+            #?(:clj [clojure.data.json :as json])
             [graph.lain-editor.workspace.layers :as layers]
             [graph.lain-editor.frontend.workspace.model :as model]
             [graph.lain-editor.workspace.model :as workspace]))
@@ -34,7 +34,7 @@
         edited (model/update-pane doc id #(-> % (layers/show-output "graph")
                                                (layers/move-layer "topology" -1)
                                                (assoc :layerMode "stack")))
-        restored #?(:clj (json/read-json (json/write-json edited))
+        restored #?(:clj (json/read-str (json/write-str edited) :key-fn keyword)
                     :cljs (js->clj (js/JSON.parse (js/JSON.stringify (clj->js edited))) :keywordize-keys true))
         legacy (-> edited (assoc :version 1 :layout {:type "pane" :id id})
                    (dissoc :desktops :activeDesktop)

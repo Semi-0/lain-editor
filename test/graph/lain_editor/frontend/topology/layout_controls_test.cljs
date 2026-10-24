@@ -1,30 +1,22 @@
 (ns graph.lain-editor.frontend.topology.layout-controls-test
   (:require [cljs.test :refer-macros [deftest is async]]
-            [graph.lain-editor.frontend.ui.dom :as dom]
             [graph.lain-editor.frontend.workspace.effects :as effects]
             [graph.lain-editor.frontend.topology.graph-layout :as layout]
             [graph.lain-editor.frontend.topology.layout-controls :as controls]
             [graph.lain-editor.frontend.ui.reactive :as rx]))
 
-(deftest budget-controls-only-request-explicit-refinement
-  (let [elements (atom []) actions (atom {}) calls (atom []) spacings (atom [])
-        element (fn [tag & _]
-                  (let [node #js {:setAttribute (fn [& _])}]
-                    (swap! elements conj [tag node]) node))]
-    (with-redefs [dom/element element dom/append! (fn [& _])
-                  dom/button (fn [label action] (swap! actions assoc label action) #js {})]
-      (controls/mount! #js {} #(swap! calls conj %) #(swap! spacings conj %)
-                       {:budgetMs 1000 :spacing 1}))
-    (let [[select spacing] (map second (filter #(= "select" (first %)) @elements))]
-      (is (= "1000" (.-value select)))
-      (is (empty? @calls))
-      (set! (.-value select) "10000")
-      (is (empty? @calls) "Changing a budget alone does not perform work")
-      ((get @actions "Refine layout"))
-      (is (= [10000] @calls))
-      (is (= "1" (.-value spacing)))
-      ((.-onchange spacing) #js {:target #js {:value "2"}})
-      (is (= [2] @spacings)))))
+(deftest budget-controls-only-declare-explicit-refinement
+  (let [view (controls/view "pane" "scope" {:budgetMs 1000 :spacing 1})
+        elements (filter #(and (vector? %) (keyword? (first %))) (tree-seq sequential? seq view))
+        budget (first (filter #(= "Layout time budget" (:aria-label (second %))) elements))
+        spacing (first (filter #(= "Node spacing" (:aria-label (second %))) elements))
+        refine (first (filter #(= :button (first %)) elements))]
+    (is (= "1000" (:value (second budget))))
+    (is (= [[:graph/budget "pane" "scope" [:event/target.value]]] (get-in budget [1 :on :change])))
+    (is (= [[:graph/refine "pane" "scope"]] (get-in refine [1 :on :click])))
+    (is (= "1" (:value (second spacing))))
+    (is (= [[:graph/spacing "pane" "scope" [:event/target.value]]] (get-in spacing [1 :on :change])))
+    (is (not-any? fn? (tree-seq coll? seq view)))))
 
 (deftest layout-transport-keeps-budget-and-refinement-explicit
   (async done
@@ -38,13 +30,13 @@
                                                #(swap! presented conj [%1 %2]) #(swap! statuses conj %))]
                      ((:refine! handle) 10000)
                      ((:spacing! handle) 2)
-                     ((:update! handle) graph)
+                     ((:update! handle) graph) ; identical topology and dimensions require no transport or solver work
                      ((:move! handle) [{:id "a" :position [4 5]}])
                      handle))]
-      (is (= [1000 10000 10000 10000 10000] (mapv :budgetMs @requests)))
-      (is (= [1 1 2 2 2] (mapv :spacing @requests)))
-      (is (= [false true true false false] (mapv :refine @requests)))
-      (is (= [true true true false false] (mapv :animate @requests)))
+      (is (= [1000 10000 10000 10000] (mapv :budgetMs @requests)))
+      (is (= [1 1 2 2] (mapv :spacing @requests)))
+      (is (= [false true true false] (mapv :refine @requests)))
+      (is (= [true true true false] (mapv :animate @requests)))
       (is (every? #(= "root" (:semanticScope %)) @requests))
       (-> (js/Promise.resolve nil)
           (.then (fn []

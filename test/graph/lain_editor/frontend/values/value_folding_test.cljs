@@ -1,9 +1,8 @@
 (ns graph.lain-editor.frontend.values.value-folding-test
-  (:require [cljs.test :refer-macros [deftest is async]]
-            [graph.lain-editor.frontend.ui.dom :as dom]
-            [graph.lain-editor.frontend.topology.graph :as graph]
+  (:require [cljs.test :refer-macros [deftest is]]
             [graph.lain-editor.frontend.topology.graph-labels :as labels]
             [graph.lain-editor.frontend.values.value-view :as value-view]
+            [graph.lain-editor.frontend.view.topology :as topology]
             [graph.lain-editor.frontend.values.value-folding :as folding]
             [graph.lain-editor.frontend.topology.viewport :as viewport]))
 
@@ -72,64 +71,38 @@
     (is (= ["…" "2"]
            (mapv :value (folding/project-rows rows #{first-key} context "cell" :valueGrid))))))
 
+(defn elements [view]
+  (filter #(and (vector? %) (keyword? (first %))) (tree-seq sequential? seq view)))
+
 (deftest inline-controls-follow-branches-and-retain-unfold-targets
   (let [project #(folding/project-rows rows % context "cell" :valueGrid true)
         open (project #{}) closed (project #{(key-at rows 0)})
-        controls (filter :foldControl (viewport/text-rows {:kind "cell" :valueGrid open}))
-        elements (atom [])]
+        controls (filter :foldControl (viewport/text-rows {:kind "cell" :valueGrid open}))]
     (is (= ["base" "no-good 1"] (mapv #(get-in % [:foldControl :label]) controls)))
     (is (true? (get-in open [0 :foldControl :expanded])))
     (is (false? (get-in closed [0 :foldControl :expanded])))
     (is (= (key-at rows 0) (get-in closed [0 :foldControl :key])))
-    (is (= 1 (count (filter :foldControl
-                           (viewport/text-rows {:kind "cell" :valueGrid closed})))))
-    (with-redefs [dom/svg (fn [tag attrs]
-                           (let [element #js {}]
-                             (swap! elements conj {:tag tag :attrs attrs :element element})
-                             element))
-                  dom/text! (fn [& _]) dom/append! (fn [& _]) dom/replace! (fn [& _])]
-      (labels/render! #js {} {:kind "cell" :valueGrid closed} {} (fn [& _])))
-    (let [toggle (first (filter #(= "value-tree-toggle" (get-in % [:attrs :class])) @elements))]
-      (is (= "Unfold base" (get-in toggle [:attrs :aria-label])))
-      (is (= "false" (get-in toggle [:attrs :aria-expanded])))
-      (is (fn? (.-onclick (:element toggle))))
-      (is (fn? (.-onkeydown (:element toggle)))))))
+    (is (= 1 (count (filter :foldControl (viewport/text-rows {:kind "cell" :valueGrid closed})))))
+    (let [view (labels/view {:kind "cell" :valueGrid closed} {} ["pane" "scene"])
+          toggle (first (filter #(= "value-tree-toggle" (:class (second %))) (elements view)))]
+      (is (= "Unfold base" (:aria-label (second toggle))))
+      (is (= "false" (:aria-expanded (second toggle))))
+      (is (= [[:value/unfold "pane" (key-at rows 0) true [:event/native]]]
+             (get-in toggle [1 :on :click])))
+      (is (vector? (get-in toggle [1 :on :keydown]))))))
 
-(deftest folding-controls-own-only-view-state-and-reuse-inspection-data
-  (async done
-    (let [folded (atom #{}) updates (atom []) inspector (atom nil) reads (atom 0)
-          toggle-handler (atom nil)
-          source {:nodes [{:id "cell" :kind "cell" :label "knowledge" :valueGrid rows}]
-                  :edges []}
-          element (fn [& _] #js {:setAttribute (fn [& _])
-                                :addEventListener (fn [_ handler] (reset! toggle-handler handler))})
-          signal #(.-signal (js/AbortController.))
-          view
-          (with-redefs [dom/element element dom/button element
-                        dom/append! (fn [& _]) dom/replace! (fn [& _])
-                        dom/value! (fn [& _])
-                        graph/mount! (fn [_body _projected inspect & _rest]
-                                       (reset! inspector inspect)
-                                       {:dispose! (fn []) :clear-detail! (fn [])
-                                        :refresh-detail! #(inspect "cell" (signal) false)
-                                        :update! (fn [projected _changed] (swap! updates conj projected))})]
-            (value-view/mount!
-             nil source
-             (fn [& _] (swap! reads inc)
-               (js/Promise.resolve {:selected {:kind "cell" :valueGrid rows}}))
-             (fn [& _]) {:pane "pane" :generation "generation"} #{} folded))]
-      (-> (@inspector "cell" (signal) false)
-          (.then (fn [_]
-                   (@toggle-handler #js {:stopPropagation (fn [])
-                                         :detail {:key (key-at rows 0) :expanded true}})
-                   (@inspector "cell" (signal) false)))
-          (.then (fn [result]
-                   (is (= 1 @reads) "Folding must not acquire runtime data")
-                   (is (= 1 (count @updates)))
-                   (is (= "…" (get-in result [:selected :valueGrid 0 :value])))
-                   (is (= rows (get-in source [:nodes 0 :valueGrid])))
-                   ((:dispose! view))
-                   (swap! folded empty)
-                   (is (= 1 (count @updates)) "Disposed views remove their subscriptions")
-                   (done)))
-          (.catch (fn [error] ((:dispose! view)) (is false (.-message error)) (done)))))))
+(deftest folding-controls-reuse-immutable-inspection-data
+  (let [source {:nodes [{:id "cell" :kind "cell" :label "knowledge" :valueGrid rows}] :edges []}
+        vm {:generations {"pane" "generation"}
+            :results {"pane" {:request {:pane "pane" :generation "generation"} :response {:graph source}}}}
+        folded (assoc-in vm [:panes-ui "pane" :topology :folded] #{(key-at rows 0)})
+        open-view (topology/view vm "pane") closed-view (topology/view folded "pane")
+        nodes #(filter (fn [element] (= "cell" (:data-node-id (second element)))) (elements %))]
+    (is (not= open-view closed-view))
+    (is (= rows (get-in source [:nodes 0 :valueGrid])) "Source observations are never folded")
+    (is (= 1 (count (nodes open-view))))
+    (is (= 1 (count (nodes closed-view))))
+    (is (some #(= "Unfold base" (:aria-label (second %))) (elements closed-view)))
+    (is (not-any? fn? (tree-seq coll? seq closed-view)) "Views carry event data rather than callbacks")
+    (is (= vm (dissoc folded :panes-ui)))
+    (is (= open-view (topology/view vm "pane")) "Rendering has no hidden state")))

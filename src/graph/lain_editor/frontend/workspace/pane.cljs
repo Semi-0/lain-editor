@@ -1,101 +1,86 @@
 (ns graph.lain-editor.frontend.workspace.pane
-  "A pane's owned reactive views. Editing updates source cells, never the DOM tree."
+  "Pure pane components. Events describe controller commands; rendering performs no effects."
   (:require [clojure.string :as str]
             [graph.lain-editor.workspace.layers :as layers]
-            [graph.lain-editor.frontend.ui.dom :as dom]
-            [graph.lain-editor.frontend.workspace.effects :as effects]
-            [graph.lain-editor.frontend.workspace.block-display :as block-display]
-            [graph.lain-editor.frontend.workspace.extension-editors :as extension-editors]
-            [graph.lain-editor.frontend.workspace.composition :as composition]
-            [graph.lain-editor.frontend.development.view :as development-view]
-            [graph.lain-editor.frontend.workspace.layer-panel :as layer-panel]
-            [graph.lain-editor.frontend.workspace.outputs :as outputs]
-            [graph.lain-editor.frontend.topology.inspection :as inspection]
             [graph.lain-editor.frontend.workspace.model :as model]
-            [graph.lain-editor.frontend.ui.reactive :as rx]
-            [graph.lain-editor.frontend.workspace.state :as s]))
+            [graph.lain-editor.frontend.workspace.block-display :as block-display]
+            [graph.lain-editor.frontend.workspace.composition :as composition]
+            [graph.lain-editor.frontend.workspace.extension-editors :as extension-editors]
+            [graph.lain-editor.frontend.workspace.layer-panel :as layer-panel]
+            [graph.lain-editor.frontend.development.view :as development-view]
+            [graph.lain-editor.frontend.view.topology :as topology]))
 
-(defn- extension-view [scope id descriptor]
-  (let [details (dom/element "details" "extension")
-        summary (dom/element "summary" "" "Extend this running block")
-        draft (dom/element "textarea")
-        apply (dom/button "Apply extension" #(effects/run! id "extend"))
-        disabled (rx/derive! scope #(or %1 (str/blank? (:extensionDraft %2))
-                                       (model/extensions-edited? %2) (not (contains? %3 id)))
-                             s/busy? descriptor s/generations)]
-    (.setAttribute draft "aria-label" "Extension code")
-    (set! (.-placeholder draft) "(define next (+ result 1))")
-    (set! (.-oninput draft) #(s/change-pane! id assoc :extensionDraft (.. % -target -value)))
-    (set! (.-hidden summary) true)
-    (rx/watch! scope descriptor
-               (fn [p]
-                 (dom/value! draft (:extensionDraft p))))
-    (rx/watch! scope disabled #(set! (.-disabled apply) %))
-    (rx/watch! scope s/busy? #(set! (.-readOnly draft) %))
-    (dom/append! details summary draft apply)))
+(defn- extension-view [vm pane pane-ui]
+  (let [id (:id pane)
+        disabled? (or (:busy? vm) (str/blank? (:extensionDraft pane))
+                      (model/extensions-edited? pane) (not (contains? (:generations vm) id)))]
+    [:details.extension
+     {:replicant/key [id :pending-extension]
+      :open (boolean (get-in pane-ui [:panels :extension]))
+      :on {:toggle [[:panel/toggle id :extension [:event/target.open]]]}}
+     [:summary {:hidden true} "Extend this running block"]
+     [:textarea {:replicant/key [id :extension-draft]
+                 :aria-label "Extension code" :placeholder "(define next (+ result 1))"
+                 :readonly (:busy? vm) :value (:extensionDraft pane)
+                 :on {:input [[:workspace/edit-extension-draft id [:event/target.value]]]}}]
+     [:button {:type "button" :disabled disabled?
+               :on {:click [[:workspace/command {:action :extend :target id :enabled (not disabled?)}]]}}
+      "Apply extension"]]))
 
-(defn- bind-source! [scope id descriptor code file meta filename status]
-  (set! (.-oninput code) #(s/change-pane! id assoc :source (.. % -target -value)))
-  (set! (.-onchange file) #(effects/load-file! id (aget (.. % -target -files) 0)))
-  (rx/watch! scope descriptor
-             (fn [p]
-               (dom/value! code (:source p))
-               (set! (.-rows code) (max 2 (inc (count (str/split-lines (str/trimr (:source p)))))))
-               (set! (.-hidden meta) (str/blank? (:filename p))) (dom/text! filename (:filename p))))
-  (rx/watch! scope s/busy? #(do (set! (.-readOnly code) %) (set! (.-disabled file) %)))
-  (let [view (rx/derive! scope
-                         (fn [p errors pending]
-                           {:text (if (= pending id) "Preparing…" (model/status-text p (get errors id)))
-                            :error? (contains? errors id)}) descriptor s/errors s/pending-id)]
-    (rx/watch! scope view #(do (dom/text! status (:text %))
-                              (set! (.-hidden (.-parentElement status)) (not (:error? %)))
-                              (.toggle (.-classList status) "error" (:error? %))))))
+(defn- source-view [vm pane index]
+  (let [id (:id pane) error (get (:errors vm) id)
+        status (if (= (:pending-id vm) id) "Preparing…" (model/status-text pane error))]
+    [:div.source-area
+     [:div.source-meta {:hidden (str/blank? (:filename pane))}
+      [:span (:filename pane)]]
+     [:textarea.code
+      {:replicant/key [id :source] :aria-label (str "Lain code " (inc index))
+       :spellcheck false :readonly (:busy? vm) :value (:source pane)
+       :rows (extension-editors/source-rows (:source pane))
+       :on {:input [[:workspace/edit-source id [:event/target.value]]]}}]
+     (extension-editors/view pane (:busy? vm))
+     [:div.statebar {:hidden (not (some? error))}
+      [:input {:replicant/key [id :source-file] :type "file" :hidden true
+               :accept ".lain,.clj,.txt" :disabled (:busy? vm)
+               :on {:change [[:file/load id [:event/target.files]]]}}]
+      [:span {:class (cond-> ["state"] error (conj "error"))} status]]]))
 
-(defn mount! [scope id index]
-  (let [descriptor (s/pane-cell scope id) request (s/request-cell scope id descriptor)
-        root (dom/element "section" "pane") area (dom/element "div" "layer-stage")
-        planes (into {} (map (fn [id] [id (dom/element "div" (str "layer-plane layer-" id))]))
-                     ["code" "result" "topology" "cell"])
-        source (dom/element "div" "source-area") meta (dom/element "div" "source-meta")
-        filename (dom/element "span") code (dom/element "textarea" "code")
-        file (dom/element "input") status (dom/element "span" "state") statebar (dom/element "div" "statebar")
-        value (dom/element "pre" "value-view") cell (dom/element "pre" "cell-view")
-        topology (dom/element "div" "display-body topology-content") footer (dom/element "div" "pane-tools")
-        presentation-host (dom/element "div" "block-display")
-        presentation (block-display/mount! scope presentation-host root descriptor)]
-    (set! (.. root -dataset -paneId) id) (set! (.-tabIndex root) 0)
-    (.setAttribute root "aria-label" (str "Editor " (inc index)))
-    (.setAttribute code "aria-label" (str "Lain code " (inc index))) (set! (.-spellcheck code) false)
-    (set! (.-type file) "file") (set! (.-accept file) ".lain,.clj,.txt") (set! (.-hidden file) true)
-    (doseq [[id plane] planes]
-      (.setAttribute plane "data-layer-id" id)
-      (.setAttribute plane "aria-label" (str (get layers/labels id) " layer")))
-    (doseq [event ["pointerdown" "focusin"]]
-      (dom/listen! scope root event (fn [_] (s/select-pane! id))))
-    (dom/listen! scope root "contextmenu"
-                 (fn [event] (.preventDefault event) (s/select-pane! id)
-                   (reset! s/palette {:open? true :target id :query "" :active 0})))
-    (rx/watch! scope (rx/derive! scope #(= id %) s/selected-id)
-               #(.toggle (.-classList root) "selected" %))
-    (dom/append! meta filename) (dom/append! statebar file status) (dom/append! source meta code (extension-editors/mount! scope id descriptor) statebar)
-    (dom/append! (get planes "code") source)
-    (dom/append! (get planes "result") value) (dom/append! (get planes "cell") cell)
-    (dom/append! (get planes "topology") topology)
-    (dom/append! (:body presentation) area)
-    (dom/append! root presentation-host footer)
-    (dom/append! footer (extension-view scope id descriptor)
-                  (development-view/mount!
-                   scope id descriptor
-                   (fn [portable]
-                     (s/change-pane! id
-                                     (fn [pane]
-                                       (if portable
-                                         (assoc pane :development portable)
-                                         (dissoc pane :development))))))
-                  (layer-panel/mount! scope id descriptor))
-    (bind-source! scope id descriptor code file meta filename status)
-    (composition/attach! scope area (:descriptor presentation) planes value)
-    (outputs/attach! scope id descriptor request
-                     {"result" value "cell" cell "topology" topology})
-    (inspection/attach! scope id request)
-    root))
+(defn- layer-view [vm pane index layer]
+  (case (:id layer)
+    "code" (source-view vm pane index)
+    "result" (topology/result-view vm (:id pane))
+    "cell" (topology/cell-view vm (:id pane))
+    "topology" [:div.display-body.topology-content (topology/view vm (:id pane))]
+    (throw (ex-info "Unknown editor layer" {:layer layer}))))
+
+(defn pane-view [vm pane index]
+  (let [id (:id pane) pane-ui (get (:panes-ui vm) id {})
+        mode (block-display/effective-mode pane-ui)
+        presented (block-display/presented-pane pane mode)]
+    [:section
+     {:replicant/key id :class (cond-> ["pane"] (= id (:selected-id vm)) (conj "selected"))
+      :data-pane-id id :tabindex 0 :aria-label (str "Editor " (inc index))
+      :replicant/on-mount [[:dom/pane-mounted id [:event/target]]]
+      :replicant/on-render [[:dom/pane-updated id [:event/target]]]
+      :replicant/on-unmount [[:dom/pane-unmounted id]]
+      :on {:pointerdown [[:workspace/select id]]
+           :focusin [[:workspace/select id]]
+           :contextmenu [[:event/prevent-default] [:workspace/select id] [:palette/open id]]}}
+     [:div {:class (case mode
+                     :normal ["block-display"]
+                     :hidden ["block-display" "block-display-hidden"]
+                     :fill ["block-display" "block-display-fill"])}
+      [:div.topology-fullscreen-shell {:replicant/key [id :fullscreen-shell]}
+       [:span.fullscreen-status {:role "status" :aria-label "Fullscreen block visualizer status"}
+        (:fullscreen-error pane-ui)]
+       [:div.topology-content.topology-fullscreen-content
+        (into [:div (composition/stage-properties presented (:measurements pane-ui))]
+              (map-indexed
+               (fn [layer-index layer]
+                 [:div (composition/plane-properties presented layer layer-index)
+                  (layer-view vm pane index layer)])
+               (layers/for-pane presented)))]]]
+     [:div.pane-tools
+      (extension-view vm pane pane-ui)
+      (development-view/view pane pane-ui)
+      (layer-panel/view pane (:busy? vm) pane-ui)]]))

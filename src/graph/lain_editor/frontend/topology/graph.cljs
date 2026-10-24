@@ -1,240 +1,98 @@
 (ns graph.lain-editor.frontend.topology.graph
-  "Reactive SVG presentation. Coordinate cells are local to this mounted graph."
-  (:require [graph.lain-editor.frontend.ui.dom :as dom]
-            [graph.lain-editor.frontend.topology.viewport :as viewport]
+  "Pure SVG scene rendering. Camera and coordinates are explicit input data."
+  (:require [clojure.string :as str]
             [graph.lain-editor.frontend.topology.graph-labels :as labels]
-            [graph.lain-editor.frontend.topology.node-detail :as node-detail]
-            [graph.lain-editor.frontend.topology.graph-layout :as layout]
-            [graph.lain-editor.frontend.topology.layout-controls :as layout-controls]
-            [graph.lain-editor.frontend.topology.graph-motion :as motion]
-            [graph.lain-editor.frontend.topology.node-flash :as flash]
-            [graph.lain-editor.frontend.ui.reactive :as rx]))
+            [graph.lain-editor.frontend.topology.viewport :as viewport]
+            [graph.lain-editor.frontend.values.value-grid :as grid]
+            [graph.lain-editor.frontend.topology.call-detail :as call-detail]))
 
-(defn- attributes! [node attrs]
-  (doseq [[k value] attrs] (.setAttribute node (name k) (str value))))
+(defn edge-points [points {:keys [from to]}]
+  (when-let [a (get points from)]
+    (when-let [b (get points to)]
+      (let [dx (- (:x b) (:x a)) dy (- (:y b) (:y a))
+            inset (fn [point]
+                    (min 0.48 (/ (+ (/ (:width point) 2) 4) (max 0.001 (abs dx)))
+                              (/ (+ (/ (:height point) 2) 4) (max 0.001 (abs dy)))))
+            start (inset a) end (- 1 (inset b))
+            point (fn [t] (str (+ (:x a) (* dx t)) "," (+ (:y a) (* dy t))))]
+        (str (point start) " " (point (/ (+ start end) 2)) " " (point end))))))
 
-(defn- graph-elements [world graph marker select]
-  (let [references (into {} (mapcat (fn [node] (map #(vector % node) (:referenceTokens node)))) (:nodes graph))
-        lines (mapv (fn [edge]
-                      (let [line (dom/svg "polyline" {:fill "none" :stroke "#ddd" :stroke-width 1
-                                                   :vector-effect "non-scaling-stroke"
-                                                   :marker-mid (str "url(#" marker
-                                                                    (if (:bidirectional edge) "-both" "") ")")})]
-                        (dom/append! world line) {:edge edge :line line})) (:edges graph))
-        nodes (mapv
-               (fn [node]
-                 (let [[width height] (viewport/node-size node)
-                       group (dom/svg "g" {:class "graph-node" :tabindex 0 :role "button"
-                                           :aria-label (str "Inspect " (:label node))
-                                           :data-node-id (:id node) :data-kind (:kind node)})
-                       shape (labels/frame-element node)
-                       label (dom/svg "g" {})
-                       title (dom/svg "title" {})
-                       hit (dom/svg "rect" {:x (- (- (/ width 2)) 4) :y (- (- (/ height 2)) 4)
-                                            :width (+ width 8) :height (+ height 8) :fill "transparent"})]
-                   (labels/render! label node references select) (dom/text! title (labels/description node))
-                   (set! (.-onkeydown group) #(when (= "Enter" (.-key %)) (select node)))
-                   (dom/append! group hit shape label title)
-                   (dom/append! world group)
-                   {:node node :group group :frame shape :label label :title title :hit hit :width width :height height})) (:nodes graph))]
-    {:lines lines :nodes nodes :dimensions (into {} (map #(vector (get-in % [:node :id]) %) nodes))}))
+(defn node-view [node point references context changed? update-count]
+  (let [[pane scene] context [width height] (viewport/node-size node)]
+    [:g {:replicant/key (:id node) :class (cond-> ["graph-node"] changed? (conj "graph-node-changed"))
+         :tabindex 0 :role "button" :aria-label (str "Inspect " (:label node))
+         :data-node-id (:id node) :data-kind (:kind node)
+         :replicant/on-render [[:graph/flash pane scene (:id node) update-count [:event/target]]]
+         :transform (str "translate(" (:x point) " " (:y point) ")")
+         :on {:keydown [[:graph/select-key pane scene (:id node) [:event/native]]]}}
+     [:rect {:x (- (- (/ width 2)) 4) :y (- (- (/ height 2)) 4) :width (+ width 8) :height (+ height 8) :fill "transparent"}]
+     (labels/frame-view node) (labels/view node references context) [:title (labels/description node)]]))
 
-(defn- update-node! [item node select references]
-  (let [[width height] (viewport/node-size node)]
-    (attributes! (:frame item) (viewport/node-frame node))
-    (attributes! (:hit item) {:x (- (- (/ width 2)) 4) :y (- (- (/ height 2)) 4)
-                            :width (+ width 8) :height (+ height 8)})
-    (attributes! (:group item) {:aria-label (str "Inspect " (:label node))})
-    (labels/render! (:label item) node references select)
-    (dom/text! (:title item) (labels/description node))
-    (set! (.-onkeydown (:group item)) #(when (= "Enter" (.-key %)) (select node)))
-    (assoc item :node node :width width :height height)))
+(defn layout-controls [pane key settings]
+  [:div {:class "layout-controls"}
+   [:label "Node spacing "
+    [:select {:aria-label "Node spacing" :title "Scales layout footprints, edge targets and gaps; card sizes stay unchanged."
+              :value (str (:spacing settings))
+              :on {:change [[:graph/spacing pane key [:event/target.value]]]}}
+     (map (fn [[factor label]] [:option {:replicant/key factor :value (str factor)} label])
+           [[1 "Normal (1×)"] [1.5 "Roomy (1.5×)"] [2 "Wide (2×)"] [3 "Very wide (3×)"]])]]
+   [:label "Layout budget "
+    [:select {:aria-label "Layout time budget" :title "Stops early at movement tolerance; time checks occur between solver batches."
+              :value (str (:budgetMs settings))
+              :on {:change [[:graph/budget pane key [:event/target.value]]]}}
+     (map (fn [[ms label]] [:option {:replicant/key ms :value (str ms)} label])
+           [[250 "250 ms"] [1000 "1 second"] [3000 "3 seconds"] [10000 "10 seconds"]])]]
+   [:button {:on {:click [[:graph/refine pane key]]}} "Refine layout"]])
 
-(defn- draw! [world elements [points view]]
-  (attributes! world {:transform (str "translate(" (:x view) " " (:y view) ") scale(" (:scale view) ")")})
-  (doseq [{:keys [node group]} (:nodes elements)]
-    (let [{:keys [x y]} (get points (:id node))]
-      (attributes! group {:transform (str "translate(" x " " y ")")})))
-  (doseq [{:keys [edge line]} (:lines elements)]
-    (let [a (get points (:from edge)) b (get points (:to edge))]
-      (if (and a b)
-        (let [dx (- (:x b) (:x a)) dy (- (:y b) (:y a))
-              inset (fn [id]
-                      (let [box (get (:dimensions elements) id)]
-                        (min 0.48 (/ (+ (/ (:width box) 2) 4) (max 0.001 (abs dx)))
-                                  (/ (+ (/ (:height box) 2) 4) (max 0.001 (abs dy))))))
-              start (inset (:from edge)) end (- 1 (inset (:to edge)))
-              point (fn [t] (str (+ (:x a) (* dx t)) "," (+ (:y a) (* dy t))))]
-          (attributes! line {:points (str (point start) " " (point (/ (+ start end) 2)) " " (point end))}))
-        (.setAttribute line "visibility" "hidden")))))
+(defn detail-view [detail context]
+  (let [[pane scene] context]
+    [:div {:class "graph-detail" :role "region" :aria-label "Node view"}
+     (when (:node detail)
+       [:div
+        [:div {:class "node-detail-header"}
+         [:span (:label detail)]
+         [:button {:aria-label "Close node view"
+                   :on {:pointerdown [[:graph/stop [:event/native]]] :focusin [[:graph/stop [:event/native]]]
+                        :click [[:graph/close-detail pane scene]]}} "Close"]]
+        [:div {:class "node-detail-body"}
+         (cond
+           (:error detail) (:error detail)
+           (:result detail) (call-detail/view (:result detail) context (:node detail) (:runtime-open? detail false))
+           :else "Reading runtime node…")]])]))
 
-(defn- pointer-input! [scope canvas points view held-id select commit]
-  (let [drag (atom nil)
-        local (fn [event]
-                (let [p (.matrixTransform (js/DOMPoint. (.-clientX event) (.-clientY event))
-                                          (.inverse (.getScreenCTM canvas)))]
-                  {:x (.-x p) :y (.-y p)}))]
-    (dom/listen! scope canvas "pointerdown"
-                 (fn [event]
-                   (let [hit (.closest (.-target event) "[data-node-id]")
-                         id (when hit (.. hit -dataset -nodeId))]
-                     (reset! held-id id)
-                     (reset! drag {:point (local event) :id id :view @view
-                                   :node-point (get @points id) :moved? false})
-                     (.setPointerCapture canvas (.-pointerId event)))))
-    (dom/listen! scope canvas "pointermove"
-                 (fn [event]
-                   (when-let [{:keys [point id node-point] original :view} @drag]
-                     (let [p (local event) dx (- (:x p) (:x point)) dy (- (:y p) (:y point))]
-                       (when (> (js/Math.hypot dx dy) 3) (swap! drag assoc :moved? true))
-                       (if (contains? @points id)
-                         (swap! points #(viewport/clear-points
-                                         (update % id assoc
-                                                 :x (+ (:x node-point) (/ dx (:scale original)))
-                                                 :y (+ (:y node-point) (/ dy (:scale original)))) id))
-                         (swap! view assoc :x (+ (:x original) dx) :y (+ (:y original) dy)))))))
-    (dom/listen! scope canvas "pointerup"
-                 (fn [_]
-                   (reset! held-id nil)
-                   (let [{:keys [id moved?]} @drag]
-                     (cond
-                       (and id moved?) (commit (mapv (fn [[id p]] {:id id :position [(:x p) (:y p)]}) @points))
-                       id (select id)
-                       :else nil))
-                   (reset! drag nil)))
-    (dom/listen! scope canvas "pointercancel" (fn [_] (reset! held-id nil) (reset! drag nil)))
-    (let [wheel (fn [event]
-                  (.preventDefault event)
-                  (swap! view viewport/zoom-view (local event) (if (neg? (.-deltaY event)) 1.1 (/ 1 1.1))))]
-      (.addEventListener canvas "wheel" wheel #js {:passive false})
-      (rx/own! scope #(.removeEventListener canvas "wheel" wheel)))))
-
-(defn mount! [body graph inspect expand request changed]
-  (let [scope (rx/scope)
-        view-state (:view-state request)
-        view-key [(:pane request) (:generation request) (:semanticScope graph)]
-        saved (when view-state (get @view-state view-key))
-        layout-settings (atom (merge {:budgetMs 1000 :spacing 1} (:layoutSettings saved)))
-        wrapper (dom/element "div" "graph-wrap")
-        scroller (dom/element "div" "graph-scroller")
-        canvas (dom/svg "svg" {:class "graph-svg" :viewBox "0 0 760 330" :aria-label "Semantic topology"})
-        world (dom/svg "g" {}) marker-id (str "arrow-" (random-uuid))
-        defs (dom/svg "defs" {}) marker (dom/svg "marker" {:id marker-id :viewBox "0 0 10 10" :refX 5 :refY 5
-                                                         :markerWidth 6 :markerHeight 6 :orient "auto"})
-        both (dom/svg "marker" {:id (str marker-id "-both") :viewBox "0 0 14 10" :refX 7 :refY 5
-                                :markerWidth 12 :markerHeight 8 :orient "auto"})
-        detail (dom/element "div" "graph-detail")
-        initial (if (= (set (map :id (:nodes graph))) (set (keys (:points saved))))
-                  (:points saved) (viewport/initial-points (:nodes graph)))
-        layout-points (rx/input! scope initial)
-        points (rx/input! scope initial)
-        held-id (atom nil)
-        view (rx/input! scope (or (:view saved) {:x 380 :y 165 :width 760 :height 330 :scale 1}))
-        current (atom graph)
-        frame! (fn [coordinates]
-                 (let [camera (viewport/fit-view coordinates {:width (max 1 (.-clientWidth scroller))
-                                                              :height (max 1 (.-clientHeight scroller))})]
-                   (attributes! canvas {:viewBox (str "0 0 " (:width camera) " " (:height camera))})
-                   (set! (.. canvas -style -width) (str (:width camera) "px"))
-                   (set! (.. canvas -style -height) (str (:height camera) "px"))
-                   (reset! view camera)))
-        constrain (fn [incoming]
-                    (if-let [id @held-id]
-                      (let [position (get @points id)]
-                        (viewport/clear-points
-                         (update incoming id assoc :x (:x position) :y (:y position)) id))
-                      (viewport/clear-points incoming)))
-        animation (motion/mount! scope canvas points layout-points constrain)
-        fit #(do ((:finish! animation)) (frame! @points))
-        first-layout? (atom (nil? saved))
-        interacted? (atom false)
-        present! (fn [result animate?]
-                   (when (compare-and-set! first-layout? true false)
-                     (when-not @interacted? (frame! (motion/point-map (:nodes result)))))
-                   ((:play! animation) result animate?))
-        pulse! (flash/mount! scope)
-        status (dom/element "span" "layout-status")
-        inspection (node-detail/mount! scope detail inspect expand)
-        select (:select! inspection)]
-    (dom/append! marker (dom/svg "path" {:d "M0 0 L10 5 L0 10 Z" :fill "#ddd"}))
-    (dom/append! both (dom/svg "path" {:d "M0 5 L5 0 L5 10 Z M14 5 L9 0 L9 10 Z" :fill "#ddd"}))
-    (dom/append! defs marker both) (dom/append! canvas defs world)
-    (dom/append! scroller canvas)
-    (dom/append! wrapper status)
-    (let [summary (dom/element "div" "semantic-summary"
-                               (str (count (:nodes graph)) " nodes · "
-                                    (count (:edges graph)) " edges"))]
-      (dom/append! wrapper summary))
-    (when (or (:partial graph) (seq (:diagnostics graph)))
-      (dom/append! wrapper (dom/element "div" "semantic-diagnostics"
-                                      (str (when (:partial graph) "Partial capture. ")
-                                           (apply str (interpose " · " (map :message (:diagnostics graph))))))))
-    (dom/append! wrapper scroller detail) (dom/replace! body wrapper)
-    (let [elements (atom (graph-elements world graph marker-id select))
-          drawing (rx/derive! scope vector points view)
-          controller (layout/attach! scope (assoc request :layout-settings layout-settings)
-                                     graph present! #(dom/text! status %))]
-      (layout-controls/mount! wrapper (:refine! controller) (:spacing! controller) @layout-settings)
-      (let [observer (js/ResizeObserver.
-                      (fn [_]
-                        (let [next (viewport/grow-view @view
-                                     {:width (max 1 (.-clientWidth scroller))
-                                      :height (max 1 (.-clientHeight scroller))})]
-                          (when (not= next @view)
-                            (attributes! canvas {:viewBox (str "0 0 " (:width next) " " (:height next))})
-                            (set! (.. canvas -style -width) (str (:width next) "px"))
-                            (set! (.. canvas -style -height) (str (:height next) "px"))
-                            (reset! view next)))))]
-        (.observe observer scroller)
-        (rx/own! scope #(.disconnect observer)))
-      (dom/listen! scope (.closest body ".pane") "lain-fit-graph" (fn [_] (fit)))
-      (rx/watch! scope drawing #(draw! world @elements %))
-      (when-let [geometry-changed! (:geometry-changed! request)]
-        (rx/watch! scope drawing (fn [_] (geometry-changed!))))
-      (doseq [event ["pointerdown" "wheel"]]
-        (dom/listen! scope canvas event
-                     (fn [_]
-                       (reset! interacted? true)
-                       (when ((:active? animation)) ((:finish! animation))))))
-      (pointer-input! scope canvas points view held-id
-                      #(when-let [node (some (fn [n] (when (= % (:id n)) n)) (:nodes @current))] (select node))
-                      (:move! controller))
-      (doseq [item (:nodes @elements) :when (changed (get-in item [:node :id]))] (pulse! item))
-      (if saved
-        (do (attributes! canvas {:viewBox (str "0 0 " (:width @view) " " (:height @view))})
-            (set! (.. canvas -style -width) (str (:width @view) "px"))
-            (set! (.. canvas -style -height) (str (:height @view) "px")))
-        (fit))
-      {:dispose! #(do (when view-state
-                        (swap! view-state assoc view-key {:view @view :points @points
-                                                        :layoutSettings @layout-settings}))
-                      (rx/dispose! scope))
-       :clear-detail! (:clear! inspection)
-       :refresh-detail! (:refresh! inspection)
-       :node-screen-point
-       (fn [id]
-         (when-let [group (:group
-                           (some (fn [item]
-                                   (when (= id (get-in item [:node :id])) item))
-                                 (:nodes @elements)))]
-           (let [bounds (.getBoundingClientRect group)]
-             {:x (+ (.-left bounds) (/ (.-width bounds) 2))
-              :y (+ (.-top bounds) (/ (.-height bounds) 2))})))
-       :update! (fn [graph changed]
-                  (let [old (into {} (map #(vector (get-in % [:node :id]) %) (:nodes @elements)))
-                        references (into {} (mapcat (fn [node] (map #(vector % node) (:referenceTokens node)))) (:nodes graph))
-                        items (mapv #(update-node! (get old (:id %)) % select references) (:nodes graph))
-                        geometry (fn [nodes] (into {} (map (fn [node] [(:id node) (viewport/node-size node)])) nodes))
-                        resized? (not= (geometry (:nodes @current)) (geometry (:nodes graph)))]
-                    (reset! current graph)
-                    (swap! elements assoc :nodes items :dimensions (into {} (map #(vector (get-in % [:node :id]) %) items)))
-                    (doseq [item items :when (changed (get-in item [:node :id]))] (pulse! item))
-                    (if resized?
-                      (let [sized (reduce (fn [positions node]
-                                            (let [[w h] (viewport/node-size node)]
-                                              (update positions (:id node) assoc :width w :height h)))
-                                          @points (:nodes graph))]
-                        (reset! layout-points (viewport/clear-points sized))
-                        ((:finish! animation))
-                        ((:update! controller) graph))
-                      (draw! world @elements [@points @view]))))})))
+(defn view [pane {:keys [key graph points camera settings layout ui changed-node-ids update-counts detail]}]
+  (let [context [pane key] marker (str "arrow-" (hash key)) refs (grid/references (:nodes graph))]
+    [:div {:class "graph-wrap" :replicant/key key}
+     [:span {:class "layout-status"} (:status layout)]
+     (layout-controls pane key settings)
+     [:div {:class "semantic-summary"} (str (count (:nodes graph)) " nodes · " (count (:edges graph)) " edges")]
+     (when (or (:partial graph) (seq (:diagnostics graph)))
+       [:div {:class "semantic-diagnostics"}
+        (str (when (:partial graph) "Partial capture. ") (str/join " · " (map :message (:diagnostics graph))))])
+     [:div {:class "graph-scroller"}
+      [:svg {:class "graph-svg" :aria-label "Semantic topology" :viewBox (str "0 0 " (:width camera) " " (:height camera))
+             :style {:width (str (:width camera) "px") :height (str (:height camera) "px")}
+             :data-layout-phase (if (< (:animation-progress ui 1) 1) "stress" "settled")
+             :data-layout-iteration (get-in layout [:result :iterationsUsed] 0)
+             :data-layout-samples (count (get-in layout [:result :frames]))
+             :replicant/on-mount [[:graph/mounted pane key [:event/target]]]
+             :replicant/on-unmount [[:graph/unmounted pane key]]
+             :on {:pointerdown [[:graph/pointer-down pane key [:event/native]]]
+                  :pointermove [[:graph/pointer-move pane key [:event/native]]]
+                  :pointerup [[:graph/pointer-up pane key [:event/native]]]
+                  :pointercancel [[:graph/pointer-cancel pane key [:event/native]]]
+                  :wheel [[:graph/wheel pane key [:event/native]]]}}
+       [:defs
+        [:marker {:id marker :viewBox "0 0 10 10" :refX 5 :refY 5 :markerWidth 6 :markerHeight 6 :orient "auto"}
+         [:path {:d "M0 0 L10 5 L0 10 Z" :fill "#ddd"}]]
+        [:marker {:id (str marker "-both") :viewBox "0 0 14 10" :refX 7 :refY 5 :markerWidth 12 :markerHeight 8 :orient "auto"}
+         [:path {:d "M0 5 L5 0 L5 10 Z M14 5 L9 0 L9 10 Z" :fill "#ddd"}]]]
+       [:g {:transform (str "translate(" (:x camera) " " (:y camera) ") scale(" (:scale camera) ")")}
+        (map (fn [index edge]
+                (when-let [positions (edge-points points edge)]
+                  [:polyline {:replicant/key [(:from edge) (:to edge) index] :points positions :fill "none" :stroke "#ddd"
+                              :stroke-width 1 :vector-effect "non-scaling-stroke"
+                              :marker-mid (str "url(#" marker (when (:bidirectional edge) "-both") ")")}]))
+              (range) (:edges graph))
+        (map #(node-view % (get points (:id %)) refs context (contains? changed-node-ids (:id %)) (get update-counts (:id %) 0)) (:nodes graph))]]]
+     (detail-view detail context)]))

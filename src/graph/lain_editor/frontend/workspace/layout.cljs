@@ -1,34 +1,32 @@
 (ns graph.lain-editor.frontend.workspace.layout
-  "Layout structure and divider ratios are separate reactive projections."
-  (:require [graph.lain-editor.frontend.ui.dom :as dom]
-            [graph.lain-editor.frontend.workspace.desktops :as desktops]
-            [graph.lain-editor.frontend.workspace.pane :as pane]
-            [graph.lain-editor.frontend.ui.reactive :as rx]
-            [graph.lain-editor.frontend.workspace.state :as s]))
+  "Pure layout projection. Ratios are UI facts; divider interaction belongs to an adapter."
+  (:require [graph.lain-editor.frontend.workspace.desktops :as desktops]
+            [graph.lain-editor.frontend.workspace.model :as model]
+            [graph.lain-editor.frontend.workspace.pane :as pane]))
 
-(defn- tree-view [scope tree path]
+(defn tree-view [vm tree path]
   (case (:type tree)
     "pane"
-    (let [index (first (keep-indexed #(when (= (:id tree) (:id %2)) %1) (:panes @s/workspace)))]
-      (pane/mount! scope (:id tree) index))
+    (let [id (:id tree) p (model/pane (:workspace vm) id)
+          index (first (keep-indexed #(when (= id (:id %2)) %1) (:panes (:workspace vm))))]
+      (when-not (and p (some? index))
+        (throw (ex-info "Layout references an unknown pane" {:id id})))
+      (pane/pane-view vm p index))
 
     "split"
-    (let [root (dom/element "div" (str "split " (:axis tree)))
-          a (dom/element "div" "branch") b (dom/element "div" "branch") handle (dom/element "div" "divider")
-          ratio (rx/derive! scope #(get-in % (conj path :ratio)) s/workspace)]
-      (dom/append! a (tree-view scope (:first tree) (conj path :first)))
-      (dom/append! b (tree-view scope (:second tree) (conj path :second)))
-      (rx/watch! scope ratio #(do (set! (.. a -style -flex) (str % " 1 0"))
-                                  (set! (.. b -style -flex) (str (- 1 %) " 1 0"))))
-      (dom/draggable! scope handle root (:axis tree) #(swap! s/workspace assoc-in (conj path :ratio) %))
-      (dom/append! root a handle b))
+    (let [ratio (:ratio tree)]
+      [:div {:replicant/key [:split path] :class ["split" (:axis tree)]}
+       [:div.branch {:replicant/key [:first path] :style {:flex (str ratio " 1 0")}}
+        (tree-view vm (:first tree) (conj path :first))]
+       [:div.divider {:replicant/key [:divider path] :role "separator"
+                      :aria-orientation (case (:axis tree) "row" "vertical" "column" "horizontal")
+                      :on {:pointerdown [[:workspace/divider-start path (:axis tree) [:event/native]]]}}]
+       [:div.branch {:replicant/key [:second path] :style {:flex (str (- 1 ratio) " 1 0")}}
+        (tree-view vm (:second tree) (conj path :second))]])
 
-    (throw (js/Error. "Unknown layout node"))))
+    (throw (ex-info "Unknown layout node" {:node tree}))))
 
-(defn mount! [scope host]
-  (let [children (atom (rx/scope))]
-    (rx/watch! scope s/shape
-               (fn [shape]
-                 (rx/dispose! @children) (reset! children (rx/scope))
-                 (dom/replace! host (tree-view @children (:tree shape) (desktops/layout-path @s/workspace)))))
-    (rx/own! scope #(rx/dispose! @children))))
+(defn view [vm]
+  (let [path (desktops/layout-path (:workspace vm))]
+    [:main#workspace {:aria-label "Tiled Lain editors"}
+     (tree-view vm (get-in (:workspace vm) path) path)]))

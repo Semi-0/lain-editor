@@ -1,124 +1,130 @@
 (ns graph.lain-editor.frontend.main
-  "Browser composition root. Reactive declarations are separate from effects."
-  (:require [graph.lain-editor.frontend.ui.dom :as dom]
-            [graph.lain-editor.frontend.workspace.desktop-bar :as desktop-bar]
-            [graph.lain-editor.frontend.workspace.effects :as effects]
-            [graph.lain-editor.frontend.workspace.layout :as layout]
-            [graph.lain-editor.frontend.workspace.model :as model]
-            [graph.lain-editor.frontend.workspace.palette :as palette]
+  "One-way composition root: source -> Missionary projection -> pure views -> Replicant."
+  (:require [replicant.dom :as r]
+            [graph.lain-editor.frontend.controller.dom :as browser]
+            [graph.lain-editor.frontend.controller.events :as events]
+            [graph.lain-editor.frontend.controller.topology :as topology]
+            [graph.lain-editor.frontend.ui.dom :as dom]
             [graph.lain-editor.frontend.ui.reactive :as rx]
-            [graph.lain-editor.frontend.workspace.remote-files :as remote-files]
+            [graph.lain-editor.frontend.view.workspace :as workspace-view]
+            [graph.lain-editor.frontend.view.save-dialog :as save-view]
+            [graph.lain-editor.frontend.workspace.source-save :as source-save]
+            [graph.lain-editor.frontend.workspace.desktops :as desktops]
             [graph.lain-editor.frontend.workspace.state :as s]))
 
-(defonce application (rx/scope))
+(defonce application (atom nil))
 
-(defn- menus! [scope]
-  (let [position (fn [event]
-                   (let [menu (.-target event)]
-                     (when (.matches menu ".options[open]")
-                       (let [anchor (.getBoundingClientRect (.querySelector menu "summary"))
-                             popover (.querySelector menu ".popover") w (.-offsetWidth popover) h (.-offsetHeight popover)]
-                         (set! (.. popover -style -left) (str (max 8 (min (- (.-right anchor) w) (- js/innerWidth w 8))) "px"))
-                         (set! (.. popover -style -top) (str (max 8 (min (+ (.-bottom anchor) 6) (- js/innerHeight h 8))) "px"))))))]
-    (.addEventListener js/document "toggle" position true)
-    (rx/own! scope #(.removeEventListener js/document "toggle" position true)))
-  (dom/listen! scope js/document "click"
-               (fn [event]
-                 (doseq [menu (array-seq (.querySelectorAll js/document ".options[open]"))]
-                   (when-not (.contains menu (.-target event)) (set! (.-open menu) false)))))
-  (dom/listen! scope js/document "keydown"
-               (fn [event]
-                 (when (= "Escape" (.-key event))
-                   (doseq [menu (array-seq (.querySelectorAll js/document ".options[open]"))]
-                     (set! (.-open menu) false) (.focus (.querySelector menu "summary")))))))
+(defn- interpret! [context actions]
+  (let [native (:replicant/dom-event context)
+        actions (if (keyword? (first actions)) [actions] actions)]
+    (try
+      (s/transact!
+       (fn []
+         (doseq [[action & args :as event] (browser/interpolate context actions)]
+           (case action
+             :event/prevent-default (when native (.preventDefault native))
+             :event/stop-propagation (when native (.stopPropagation native))
+             :workspace/divider-start (browser/dispatch! event)
+             :palette/backdrop (browser/dispatch! event)
+             :file/open-key (when (contains? #{"Enter" " "} (first args))
+                              (when native (.preventDefault native))
+                              (.click (.getElementById js/document "open")))
+             :file/restore (events/dispatch! event native)
+             :file/load (events/dispatch! event native)
+             (cond
+               (= "dom" (namespace action)) (browser/dispatch! event)
+               (= "save-dialog" (namespace action))
+               (do (when (and native (= action :save-dialog/submit)) (.preventDefault native))
+                   (source-save/dispatch! event))
+               :else
+               (do
+                 (when (and native
+                            (or (= action :palette/close)
+                                (and (= action :palette/key)
+                                     (contains? #{"ArrowUp" "ArrowDown" "Enter" "Escape"} (first args)))
+                                (= action :workspace/context-menu)
+                                (and (= action :layer/binding-key) (= "Enter" (first args)))))
+                   (.preventDefault native))
+                 (events/dispatch! event native)))))))
+      (catch :default error
+        (reset! s/message (.-message error))
+        (js/console.error "Editor event failed" (clj->js actions) error)))))
 
-(defn- keyboard! [scope]
-  (dom/listen! scope js/document "keydown"
-               (fn [event]
-                 (let [modifier? (or (.-metaKey event) (.-ctrlKey event)) key (.-key event)]
-                   (cond
-                     (and modifier? (= "k" (.toLowerCase key)))
-                     (do (.preventDefault event) (palette/open!))
-                     (and modifier? (= "Enter" key) (not (:open? @s/palette)))
-                     (do (.preventDefault event) (effects/run! @s/selected-id "run"))
-                     (and modifier? (= "s" (.toLowerCase key)) (not (:open? @s/palette)))
-                     (do (.preventDefault event)
-                         (when-not (.querySelector js/document "dialog.source-save[open]")
-                           (effects/save-block! @s/selected-id)))
-                     :else nil)))))
+(defn- render! [root view-state]
+  (let [active (.-activeElement js/document)
+        editable? (and active (contains? #{"TEXTAREA" "INPUT"} (.-tagName active)))
+        selection (when (and editable? (number? (.-selectionStart active)))
+                    [(.-selectionStart active) (.-selectionEnd active) (.-selectionDirection active)])
+        scroll (when editable? [(.-scrollTop active) (.-scrollLeft active)])]
+    (r/render root
+              (conj (workspace-view/view view-state)
+                    (save-view/view (get-in view-state [:ui :save-dialog]))))
+    (when (and selection (identical? active (.-activeElement js/document))
+               (.-isConnected active))
+      (.setSelectionRange active (first selection) (second selection) (nth selection 2))
+      (set! (.-scrollTop active) (first scroll))
+      (set! (.-scrollLeft active) (second scroll))))
+  (browser/after-render!))
 
-(defn- workspace-controls! [scope]
-  (let [file (.getElementById js/document "open") menu (.querySelector js/document ".workspace-options")
-        closed (.getElementById js/document "closed-blocks")]
-    (dom/listen! scope (.getElementById js/document "commands") "click" (fn [_] (palette/open!)))
-    (dom/listen! scope (.getElementById js/document "save") "click"
-                 (fn [_] (effects/save-workspace!) (set! (.-open menu) false)))
-    (dom/listen! scope (.getElementById js/document "save-as") "click"
-                 (fn [_] (effects/save-workspace-as!) (set! (.-open menu) false)))
-    (dom/listen! scope file "change"
-                 (fn [_]
-                   (set! (.-open menu) false)
-                   (when-let [input (aget (.-files file) 0)]
-                     (-> (.text input)
-                         (.then #(effects/restore! (js->clj (js/JSON.parse %) :keywordize-keys true)
-                                                   {:workspace-path nil}))
-                         (.catch #(reset! s/message (.-message %)))
-                         (.finally #(set! (.-value file) ""))))))
-    (dom/listen! scope (.getElementById js/document "open-label") "keydown"
-                 (fn [event]
-                   (when (contains? #{"Enter" " "} (.-key event)) (.preventDefault event) (.click file))))
-    (rx/watch! scope (rx/derive! scope #(get % :closedBlocks []) s/workspace)
-               (fn [entries]
-                 (dom/replace! closed)
-                 (when (seq entries)
-                   (dom/append! closed (dom/element "div" "palette-heading" "Reopen closed block"))
-                   (doseq [entry (reverse entries)]
-                     (dom/append!
-                      closed
-                      (dom/button (model/closed-block-label entry)
-                                  #(do (effects/reopen-closed-block! (:id entry))
-                                       (set! (.-open menu) false))))))))
-    (rx/watch! scope s/busy?
-               (fn [busy?]
-                 (doseq [control (array-seq (.querySelectorAll js/document ".workspace-actions button, .workspace-actions input"))]
-                   (set! (.-disabled control) busy?))))))
+(defn- renderer! [owner root]
+  (let [pending (atom nil) scheduled (atom nil) alive? (atom true)
+        draw! (fn [_]
+                (reset! scheduled nil)
+                (when @alive?
+                  (try
+                    (render! root @pending)
+                    (catch :default error
+                      (let [message (str "View error: " (.-message error))]
+                        (when (not= @s/message message) (reset! s/message message))
+                        (js/console.error "Editor render failed" error))))))
+        view-state (rx/derive! owner s/snapshot s/source)]
+    (rx/watch! owner view-state
+               (fn [value]
+                 (reset! pending value)
+                 (when-not @scheduled
+                   (reset! scheduled (js/requestAnimationFrame draw!)))))
+    (rx/own! owner #(do (reset! alive? false)
+                       (when @scheduled (js/cancelAnimationFrame @scheduled))
+                       (r/unmount root)))))
 
-(defn- storage! [scope]
-  ;; Read the saved document before subscribing. A failed import cannot overwrite it.
-  (let [saved (.getItem js/localStorage effects/storage-key)
-        saved-path (.getItem js/localStorage effects/workspace-path-storage-key)
-        workspace-key (random-uuid) path-key (random-uuid)]
-    (add-watch s/workspace workspace-key (fn [_ _ _ document] (effects/persist! document)))
-    (add-watch s/workspace-path path-key (fn [_ _ _ path] (effects/persist-workspace-path! path)))
-    (rx/own! scope #(do (remove-watch s/workspace workspace-key)
-                        (remove-watch s/workspace-path path-key)))
-    (if saved
-      (try (effects/restore! (js->clj (js/JSON.parse saved) :keywordize-keys true)
-                             {:workspace-path saved-path})
-           (catch :default error (reset! s/message (.-message error))))
-      (effects/persist! @s/workspace))))
+(defn- pane-processes! [owner]
+  (let [panes (atom {})
+        ids (rx/derive! owner desktops/pane-ids s/workspace)]
+    (rx/watch! owner ids
+               (fn [visible]
+                 (let [wanted (set visible)]
+                   (doseq [[id process] @panes]
+                     (when-not (contains? wanted id)
+                       (swap! panes dissoc id)
+                       (rx/dispose! process)))
+                   (doseq [id visible]
+                     (when-not (contains? @panes id)
+                       (let [process (rx/scope)]
+                         (swap! panes assoc id process)
+                         (topology/attach! process id)))))))
+    (rx/own! owner #(doseq [[_ process] @panes] (rx/dispose! process)))))
+
+(defn dispose! []
+  (when-let [owner @application]
+    (reset! application nil)
+    (rx/dispose! owner)))
 
 (defn init! []
-  (rx/dispose! application)
-  (.setAttribute (.-body js/document) "data-frontend" "clojurescript-javelin")
-  (layout/mount! application (.getElementById js/document "workspace"))
-  (palette/mount! application)
-  (desktop-bar/mount! application)
-  (let [status (.getElementById js/document "message")]
-    (.setAttribute status "role" "status")
-    (.setAttribute status "aria-live" "polite")
-    (rx/watch! application s/bottom-status
-               (fn [{:keys [text error?]}]
-                 (dom/text! status text)
-                 (.setAttribute status "title" text)
-                 (.toggle (.-classList status) "error" error?))))
-  (rx/watch! application (rx/derive! application #(count (:panes %)) s/workspace)
-             #(dom/text! (.getElementById js/document "count") (str (.padStart (str %) 2 "0") " blocks")))
-  (menus! application) (keyboard! application) (workspace-controls! application)
-  (let [timer (js/setInterval #(when (and (not @s/busy?) (not (.-hidden js/document))) (swap! s/tick inc)) 2000)]
-    (rx/own! application #(js/clearInterval timer)))
-  (dom/listen! application js/window "beforeunload" (fn [_] (rx/dispose! application)))
-  (storage! application)
-  (remote-files/attach! application))
+  (dispose!)
+  (let [owner (rx/scope #(reset! s/message (str "Reactive view: " (.-message %)))) root (.getElementById js/document "app")]
+    (when-not root (throw (ex-info "Editor root is missing" {})))
+    (reset! application owner)
+    (rx/own! owner source-save/close!)
+    (.setAttribute (.-body js/document) "data-frontend" "replicant-missionary")
+    (r/set-dispatch! interpret!)
+    (browser/attach! owner)
+    (rx/own! owner (topology/register!))
+    (events/attach! owner)
+    (pane-processes! owner)
+    (renderer! owner root)
+    (let [timer (js/setInterval #(when (and (not @s/busy?) (not (.-hidden js/document)))
+                                  (swap! s/tick inc)) 2000)]
+      (rx/own! owner #(js/clearInterval timer)))
+    (dom/listen! owner js/window "beforeunload" dispose!)))
 
-(init!)
+(when (exists? js/document) (init!))

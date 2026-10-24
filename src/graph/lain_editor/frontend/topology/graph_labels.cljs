@@ -1,8 +1,7 @@
 (ns graph.lain-editor.frontend.topology.graph-labels
-  "Divided value sections with stable, inspectable cell identity circles."
+  "Pure SVG value sections and inspectable cell identity circles."
   (:require [clojure.string :as str]
             [graph.lain-editor.frontend.ui.presentation :as presentation]
-            [graph.lain-editor.frontend.ui.dom :as dom]
             [graph.lain-editor.frontend.workspace.source-marker :as source-marker]
             [graph.lain-editor.frontend.topology.viewport :as viewport]))
 
@@ -13,106 +12,77 @@
                                (map #(str/trim (str (:key %) " " (:value %))) (:valueGrid node)))))
     (presentation/display-text (str (:label node) "\n" (:value node)))))
 
-(defn- append-text! [row text]
-  (let [span (dom/svg "tspan" {})]
-    (dom/text! span text) (dom/append! row span)))
+(defn frame-view [node]
+  [:rect (merge (viewport/node-frame node)
+                {:class "node-frame" :fill "var(--background)" :stroke "#ddd"
+                 :stroke-width 1 :shape-rendering "geometricPrecision"})])
 
-(defn- reference! [row token references select]
-  (let [target (get references token)
-        mark (dom/svg "tspan" {:class "cell-reference" :role "button" :tabindex 0
-                                :aria-label (str "Inspect referenced cell " (or (:label target) token))})
-        inspect (fn [event]
-                  (.stopPropagation event)
-                  (if target (select target) (.setAttribute mark "aria-label" (str token " is outside this frame"))))]
-    (dom/text! mark (viewport/reference-glyph token))
-    (.setAttribute mark "data-reference" token)
-    (set! (.-onpointerdown mark) #(.stopPropagation %))
-    (set! (.-onpointerup mark) inspect)
-    (set! (.-onkeydown mark) #(when (= "Enter" (.-key %)) (inspect %)))
-    (dom/append! row mark)))
-
-(defn- content! [row text references select]
-  (loop [remaining text]
+(defn- content [text references [pane scene]]
+  (loop [remaining text parts [] ordinal 0]
     (if-let [token (re-find viewport/reference-pattern remaining)]
-      (let [index (.indexOf remaining token)]
-        (append-text! row (subs remaining 0 index))
-        (reference! row token references select)
-        (recur (subs remaining (+ index (count token)))))
-      (append-text! row remaining))))
+      (let [index (.indexOf remaining token) target (get references token)]
+        (recur (subs remaining (+ index (count token)))
+               (conj parts [:tspan {:replicant/key [ordinal :text]} (subs remaining 0 index)]
+                     [:tspan {:replicant/key [ordinal :reference] :class "cell-reference" :role "button" :tabindex 0
+                              :data-reference token
+                              :aria-label (str "Inspect referenced cell " (or (:label target) (str token " is outside this frame")))
+                              :on {:pointerdown [[:graph/stop [:event/native]]]
+                                   :pointerup [[:graph/reference pane scene (:id target) [:event/native]]]
+                                   :keydown [[:graph/reference-key pane scene (:id target) [:event/native]]]}}
+                      (viewport/reference-glyph token)])
+               (inc ordinal)))
+      (conj parts [:tspan {:replicant/key [ordinal :text]} remaining]))))
 
-(defn- text! [container x y text anchor role references select]
-  (let [row (dom/svg "text" {:x x :y y :text-anchor anchor
-                              :class (str "node-" (name role))})]
-    (content! row text references select)
-    (dom/append! container row)))
+(defn- text-view [x y text anchor role references context]
+  [:text {:x x :y y :text-anchor anchor :class (str "node-" (name role))}
+   (seq (content text references context))])
 
-(defn frame-element [node]
-  (dom/svg "rect" (merge (viewport/node-frame node)
-                         {:class "node-frame" :fill "var(--background)" :stroke "#ddd"
-                          :stroke-width 1 :shape-rendering "geometricPrecision"})))
+(declare view)
 
-(declare render!)
+(defn- linked-list-view [{:keys [top bottom list-layout list-x]} references context]
+  [:g {:class "linked-list" :transform (str "translate(" (or list-x 0) " " (/ (+ top bottom) 2) ")")}
+   (map (fn [index {:keys [points dot]}]
+           [:g {:replicant/key [:link index]}
+            [:polyline {:points (str/join " " (map #(str/join "," %) points))
+                        :fill "none" :stroke "#eee" :stroke-width 1}]
+            [:circle {:cx (first dot) :cy (second dot) :r 2.5 :fill "#eee"}]])
+         (range) (:links list-layout))
+   (map (fn [index {:keys [node terminal? x y]}]
+           (if terminal?
+             [:circle {:replicant/key [:item index] :cx x :cy y :r 3 :fill "#eee" :class "list-end"}]
+             [:g {:replicant/key [:item index] :class "list-element" :transform (str "translate(" x " " y ")")}
+              (view node references context)])) (range) (:items list-layout))])
 
-(defn- linked-list! [container {:keys [top bottom list-layout list-x]} references select]
-  (let [group (dom/svg "g" {:class "linked-list" :transform (str "translate(" (or list-x 0) " " (/ (+ top bottom) 2) ")")})]
-    (doseq [{:keys [points dot]} (:links list-layout)]
-      (dom/append! group (dom/svg "polyline" {:points (str/join " " (map #(str/join "," %) points))
-                                              :fill "none" :stroke "#eee" :stroke-width 1})
-                   (dom/svg "circle" {:cx (first dot) :cy (second dot) :r 2.5 :fill "#eee"})))
-    (doseq [{:keys [node terminal? x y]} (:items list-layout)]
-      (if terminal?
-        (dom/append! group (dom/svg "circle" {:cx x :cy y :r 3 :fill "#eee" :class "list-end"}))
-        (let [box (dom/svg "g" {:class "list-element" :transform (str "translate(" x " " y ")")})]
-          (let [content (dom/svg "g" {})] (render! content node references select) (dom/append! box content))
-          (dom/append! group box))))
-    (dom/append! container group)))
-
-(defn- tree-branches! [container rows left]
+(defn- tree-branches [rows left]
   (let [entries (into {} (map (juxt :tree-id identity)) (filter :tree-first? rows))
         middle #(/ (+ (:top %) (:bottom %)) 2)]
-    (doseq [[_ row] entries
-            :let [parent (get entries (:tree-parent row))]
-            :when parent]
-      (let [x (+ left 4 (* viewport/tree-indent (:tree-depth parent)))
-            end (+ left 8 (* viewport/tree-indent (:tree-depth row)))
-            y (middle row)]
-        (dom/append! container
-                     (dom/svg "path" {:class "value-tree-branch" :fill "none"
-                                      :stroke "#888" :stroke-width 1
-                                      :d (str "M" x " " (middle parent) " V" y " H" end)}))))))
+    (seq (for [[id row] entries :let [parent (get entries (:tree-parent row))] :when parent]
+           [:path {:replicant/key [:branch id] :class "value-tree-branch" :fill "none"
+                   :stroke "#888" :stroke-width 1
+                   :d (str "M" (+ left 4 (* viewport/tree-indent (:tree-depth parent))) " " (middle parent)
+                           " V" (middle row) " H" (+ left 8 (* viewport/tree-indent (:tree-depth row))))}]))))
 
-(defn- fold-control! [container x y {:keys [expanded label] :as control}]
-  (let [button (dom/svg "text" {:x (- x 12) :y y :class "value-tree-toggle"
-                                :role "button" :tabindex 0 :aria-expanded (str expanded)
-                                :aria-label (str (if expanded "Fold " "Unfold ") label)})
-        toggle (fn [event]
-                 (.preventDefault event)
-                 (.stopPropagation event)
-                 (.dispatchEvent button (js/CustomEvent. "valuefold"
-                                           #js {:bubbles true :detail control})))]
-    (dom/text! button (if expanded "▾" "▸"))
-    (set! (.-onpointerdown button) #(.stopPropagation %))
-    (set! (.-onpointerup button) #(.stopPropagation %))
-    (set! (.-onclick button) toggle)
-    (set! (.-onkeydown button)
-          #(when (contains? #{"Enter" " "} (.-key %)) (toggle %)))
-    (dom/append! container button)))
+(defn- fold-control [x y {:keys [expanded label key]} [pane _scene]]
+  [:text {:x (- x 12) :y y :class "value-tree-toggle" :role "button" :tabindex 0
+          :aria-expanded (str expanded) :aria-label (str (if expanded "Fold " "Unfold ") label)
+          :on {:pointerdown [[:graph/stop [:event/native]]] :pointerup [[:graph/stop [:event/native]]]
+               :click [[:value/unfold pane key (not expanded) [:event/native]]]
+               :keydown [[:value/unfold-key pane key (not expanded) [:event/native]]]}}
+   (if expanded "▾" "▸")])
 
-(defn render! [container node references select]
-  (dom/replace! container)
-  (let [rows (viewport/text-rows node)
-        [width _] (viewport/node-size node)
+(defn view [node references context]
+  (let [rows (viewport/text-rows node) [width _] (viewport/node-size node)
         left (+ (- (/ width 2)) viewport/outer-padding)]
-    (tree-branches! container rows left)
-    (doseq [{:keys [text y top bottom role sourceToken sourceReference list-layout tree? tree-depth] :as row} rows]
-      (let [x (if tree? (+ left 12 (* viewport/tree-indent tree-depth)) 0)]
-        (when-let [control (:foldControl row)]
-          (fold-control! container x y control))
-        (cond
-          list-layout
-          (linked-list! container (cond-> row tree? (assoc :list-x (+ x (/ (:width list-layout) 2)))) references select)
-          sourceToken
-          (let [width (+ 18 (viewport/text-width text)) start (if tree? x (- (/ width 2)))]
-            (source-marker/render! container start (+ (/ (+ top bottom) 2) 3.5) sourceToken sourceReference references select)
-            (text! container (+ start 18) y text "start" role references select))
-          :else (text! container x y text (if tree? "start" "middle") role references select))))))
+    [:g {:class "node-label"}
+     (tree-branches rows left)
+     (map (fn [index {:keys [text y top bottom role sourceToken sourceReference list-layout tree? tree-depth] :as row}]
+             (let [x (if tree? (+ left 12 (* viewport/tree-indent tree-depth)) 0)]
+               [:g {:replicant/key [:row index]}
+                (when-let [control (:foldControl row)] (fold-control x y control context))
+                (cond
+                  list-layout (linked-list-view (cond-> row tree? (assoc :list-x (+ x (/ (:width list-layout) 2)))) references context)
+                  sourceToken (let [width (+ 18 (viewport/text-width text)) start (if tree? x (- (/ width 2)))]
+                                [:g (source-marker/view start (+ (/ (+ top bottom) 2) 3.5) sourceToken sourceReference references context)
+                                 (text-view (+ start 18) y text "start" role references context)])
+                  :else (text-view x y text (if tree? "start" "middle") role references context))]))
+           (range) rows)]))

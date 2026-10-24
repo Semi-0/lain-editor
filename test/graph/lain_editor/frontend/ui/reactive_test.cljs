@@ -7,7 +7,6 @@
             [graph.lain-editor.frontend.ui.dom :as dom]
             [graph.lain-editor.frontend.workspace.source-marker :as source-marker]
             [cljs.test :refer-macros [deftest is async]]
-            [javelin.core :as j :refer-macros [dosync]]
             [graph.lain-editor.frontend.topology.viewport :as viewport]
             [graph.lain-editor.workspace.layers :as layers]
             [graph.lain-editor.frontend.workspace.desktops :as desktops]
@@ -21,15 +20,20 @@
             [graph.lain-editor.frontend.ui.reactive :as rx]))
 
 (deftest transaction-propagates-consistent-values-once
-  (let [scope (rx/scope) a (rx/input! scope 1) b (rx/input! scope 2)
-        sum (rx/derive! scope + a b) pair (rx/derive! scope vector a sum) seen (atom [])]
+  (let [scope (rx/scope) source (atom {:a 1 :b 2})
+        a (rx/lens source :a #(assoc %1 :a %2))
+        b (rx/lens source :b #(assoc %1 :b %2))
+        pair (rx/derive! scope (fn [{:keys [a b]}] [a (+ a b)]) source)
+        seen (atom [])]
     (rx/watch! scope pair #(swap! seen conj %))
-    (dosync (reset! a 10) (reset! b 20))
+    (rx/transact! source #(do (reset! a 10) (reset! b 20)))
     (is (= [[1 3] [10 30]] @seen))
+    (is (not (satisfies? IReset pair)) "Derived values have no independent mutation API")
+    (is (= {:a 10 :b 20} @source))
     (rx/dispose! scope)))
 
 (deftest disposed-views-stop-reacting
-  (let [source (j/cell 1) scope (rx/scope) computations (atom 0)
+  (let [source (atom 1) scope (rx/scope) computations (atom 0)
         derived (rx/derive! scope #(do (swap! computations inc) (inc %)) source) seen (atom [])]
     (rx/watch! scope derived #(swap! seen conj %))
     (reset! source 2) (is (= [2 3] @seen))
@@ -38,7 +42,7 @@
       (reset! source 3)
       (is (= before @computations) "Disposed formulas unlink from their inputs"))
     (is (= [2 3] @seen))
-    (is (empty? @scope)) (j/destroy-cell! source)))
+    (is (empty? @scope))))
 
 (deftest development-dataflow-reduces-events-before-interpreting-effects
   (let [scope (rx/scope) persisted (atom []) interpreted (atom [])
@@ -80,19 +84,19 @@
           document (-> initial
                        (model/update-pane id assoc :source "unsaved draft")
                        (model/split-pane id "row" (model/new-pane "other")))]
-      (dosync (reset! state/workspace document) (reset! state/selected-id id))
-      (with-redefs [effects/api! (fn [_] (js/Promise.reject (js/Error. "close failed")))]
+      (state/transact! (fn [] (reset! state/workspace document) (reset! state/selected-id id)))
+      (with-redefs [effects/api! (fn [& _] (js/Promise.reject (js/Error. "close failed")))]
         (-> (effects/close-pane! id)
             (.then (fn [_]
-                     (is (= document @state/workspace))
+                     (is (= (desktops/select-pane document id) @state/workspace))
                      (is (empty? (get @state/workspace :closedBlocks [])))
-                     (dosync (reset! state/workspace original-workspace)
-                             (reset! state/selected-id original-selected))
+                     (state/transact! (fn [] (reset! state/workspace original-workspace)
+                             (reset! state/selected-id original-selected)))
                      (done)))
             (.catch (fn [error]
                       (is false (.-message error))
-                      (dosync (reset! state/workspace original-workspace)
-                              (reset! state/selected-id original-selected))
+                      (state/transact! (fn [] (reset! state/workspace original-workspace)
+                              (reset! state/selected-id original-selected)))
                       (done))))))))
 
 (deftest label-sized-nodes-adapt-density-without-automatic-scaling
@@ -148,14 +152,11 @@
            (viewport/node-size (assoc value-cell :semanticScope "compound-value"))))))
 
 (defn- rendered-value-elements [node]
-  (let [element (fn [tag attrs] {:tag tag :attrs attrs :children (atom [])})
-        root (element "g" {})]
-    (with-redefs [dom/svg element
-                  dom/append! (fn [parent & children] (swap! (:children parent) into children))
-                  dom/replace! (fn [parent & children] (reset! (:children parent) (vec children)))
-                  dom/text! (fn [element text] (swap! (:children element) conj text))]
-      (labels/render! root node {} identity))
-    (filter map? (tree-seq map? #(when (map? %) @(:children %)) root))))
+  (keep (fn [value]
+          (when (and (vector? value) (keyword? (first value)))
+            {:tag (name (first value))
+             :attrs (when (map? (second value)) (second value))}))
+        (tree-seq coll? seq (labels/view node {} ["test" "root"]))))
 
 (deftest nested-cell-values-use-a-tree-with-real-parent-entries
   (let [entries [{:key "learned no-goods" :value "2" :depth 0}
@@ -400,21 +401,15 @@
       (is (<= (+ (abs y) (/ (second size) 2)) (/ (:height layout) 2))))))
 
 (deftest list-values-do-not-render-semantic-node-frames
-  (let [element (fn [tag attrs] {:tag tag :attrs attrs :children (atom [])})
-        root (element "g" {})]
-    (with-redefs [dom/svg element
-                  dom/append! (fn [parent & children] (swap! (:children parent) into children))
-                  dom/replace! (fn [parent & children] (reset! (:children parent) (vec children)))
-                  dom/text! (fn [node text] (swap! (:children node) conj text))]
-      (labels/render! root {:kind "cell" :label "domain"
-                            :valueGrid [{:key "" :value "" :depth 0
-                                         :linkedList {:items [[{:key "" :value "1" :depth 0}]
-                                                              [{:key "" :value "2" :depth 0}]]
-                                                      :tail {:kind "empty"}}}]} {} identity))
-    (let [elements (filter map? (tree-seq map? #(when (map? %) @(:children %)) root))]
-      (is (not-any? #(= "rect" (:tag %)) elements)
-          "Data contents must not masquerade as propagator or cell cards")
-      (is (= 2 (count (filter #(= "list-element" (get-in % [:attrs :class])) elements)))))))
+  (let [elements (rendered-value-elements
+                  {:kind "cell" :label "domain"
+                   :valueGrid [{:key "" :value "" :depth 0
+                                :linkedList {:items [[{:key "" :value "1" :depth 0}]
+                                                     [{:key "" :value "2" :depth 0}]]
+                                             :tail {:kind "empty"}}}]})]
+    (is (not-any? #(= "rect" (:tag %)) elements)
+        "Data contents must not masquerade as propagator or cell cards")
+    (is (= 2 (count (filter #(= "list-element" (get-in % [:attrs :class])) elements))))))
 
 (deftest linked-list-empty-and-pending-tails-are-distinct
   (let [empty (list-geometry/arrange {:items [] :tail {:kind "empty"}} viewport/node-size)
@@ -450,3 +445,13 @@
     (is (= [] (get-in (node-detail/sections (assoc selected :contentGrid []) true) [1 :rows])))
     (let [captured (assoc selected :contentGrid [{:key "" :value "nil" :depth 0}])]
       (is (= "nil" (get-in (node-detail/sections captured true) [1 :rows 0 :value]))))))
+
+(deftest reactive-failures-reach-the-owning-boundary
+  (let [failures (atom []) owner (rx/scope #(swap! failures conj (.-message %)))
+        source (atom 1)]
+    (rx/watch! owner source (fn [value] (when (= value 2) (throw (js/Error. "projection failed")))))
+    (reset! source 2)
+    (is (= ["projection failed"] @failures))
+    (rx/dispose! owner)
+    (rx/dispose! owner)
+    (is (empty? @owner))))

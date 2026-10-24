@@ -1,10 +1,13 @@
 {:paths ["src" "resources"]
- :deps {lain-editor/contracts {:local/root "contracts"}}
- :aliases {:editor/cljs {:extra-paths ["build"]
-                        :extra-deps {org.clojure/clojurescript {:mvn/version "1.12.145"}
-                                     hoplon/javelin {:mvn/version "3.9.3"}}
-                        :main-opts ["-m" "graph.lain-editor.build"]}
-           :editor/cljs-test {:extra-paths ["build" "test" "contracts/test"]
-                             :extra-deps {org.clojure/clojurescript {:mvn/version "1.12.145"}
-                                          hoplon/javelin {:mvn/version "3.9.3"}}
-                             :main-opts ["-m" "graph.lain-editor.build" "test"]}}}
+ :deps {lain-editor/contracts {:local/root "contracts"}
+        missionary/missionary {:mvn/version "b.47"}
+        no.cjohansen/replicant {:mvn/version "2026.07.1"}}
+ :aliases {:test {:extra-paths ["test"]
+                  :extra-deps {org.clojure/data.json {:mvn/version "2.5.2"}}
+                  :main-opts ["-m" "lain-editor.test-runner"]}
+           :editor/cljs {:extra-paths ["build"]
+                        :extra-deps {org.clojure/clojurescript {:mvn/version "1.12.145"}}
+                        :main-opts ["-m" "lain-editor.build"]}
+           :editor/cljs-test {:extra-paths ["build" "test"]
+                             :extra-deps {org.clojure/clojurescript {:mvn/version "1.12.145"}}
+                             :main-opts ["-m" "lain-editor.build" "test"]}}}
