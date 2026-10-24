@@ -8,7 +8,7 @@
     nil
     (let [output "target/lain-editor/public/lain-editor/compiled/app.js"]
       (io/make-parents output)
-      (cljs/build (cljs/inputs "editor/src") {:main 'graph.lain-editor.frontend.main
+      (cljs/build (cljs/inputs "src" "contracts/src") {:main 'graph.lain-editor.frontend.main
                        :output-to output
                        :output-dir "target/lain-editor/public/lain-editor/compiled/out"
                        :optimizations :simple
@@ -20,7 +20,7 @@
     (do
       (io/make-parents "target/lain-editor/tests.js")
       (spit "target/lain-editor/package.json" "{\"type\":\"commonjs\"}\n")
-      (cljs/build (cljs/inputs "editor/src" "editor/test")
+      (cljs/build (cljs/inputs "src" "contracts/src" "test" "contracts/test")
                   {:main 'graph.lain-editor.frontend.test-runner
                    :target :nodejs
                    :output-to "target/lain-editor/tests.js"

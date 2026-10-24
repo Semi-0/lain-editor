@@ -1,0 +1,6 @@
+/target/
+/.cpcache/
+/.clj-kondo/.cache/
+/node_modules/
+/.agent-memory/
+/.DS_Store
