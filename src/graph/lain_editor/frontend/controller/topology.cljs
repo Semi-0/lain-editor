@@ -78,11 +78,17 @@
       (animate! id key animate?))))
 
 (defn- start-layout! [id item]
-  (let [key (:key item) owner (runtime id) scope (rx/scope) signature (:signature item)]
+  (let [key (:key item) owner (runtime id) scope (rx/scope) signature (:signature item)
+        cached (get-in @s/remote [:topology id :layouts key])
+        initial-layout (when (= signature (:signature cached)) (:result cached))]
     ;; Install identity before transport callbacks can trigger another synchronization.
     (swap! (:layouts owner) assoc key {:signature signature :scope scope :source (:source item) :owner-context [(:frame item) (:observation item)]})
+    ;; A desktop remount owns new controllers, but retains completed geometry.
+    ;; Finish an interrupted entrance animation instead of replaying it.
+    (when initial-layout (finish-animation! id key))
     (let [handle (layout/attach!
-                  scope (assoc (:request item) :layout-settings (settings-lens id key) :api! (:api! owner)) (:graph item)
+                  scope (assoc (:request item) :layout-settings (settings-lens id key)
+                               :initial-layout initial-layout :api! (:api! owner)) (:graph item)
                   #(when (alive? id (:token owner)) (present-layout! id key %1 %2))
                   #(when (alive? id (:token owner))
                      (swap! s/remote assoc-in [:topology id :layouts key :status] %)))]

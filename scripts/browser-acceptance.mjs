@@ -291,6 +291,7 @@ try {
   await check('desktop switching preserves source and camera', async () => {
     const before = await camera.getAttribute('transform');
     const originalSource = await code.inputValue();
+    const completedLayouts = layoutRequests.length;
     await paletteCommand('New desktop');
     await page.waitForFunction(() => document.querySelectorAll('.desktop-bar button').length === 2);
     report.newDesktopInitialFocus = await page.evaluate(() => document.activeElement?.matches('.pane.selected textarea.code'));
@@ -302,6 +303,9 @@ try {
     assert.equal(await page.locator('.pane.selected textarea.code').first().inputValue(), originalSource);
     await page.locator('.pane.selected .graph-node').first().waitFor({ state: 'visible' });
     assert.equal(await page.locator('.pane.selected .graph-svg > g').first().getAttribute('transform'), before);
+    assert.equal(layoutRequests.length, completedLayouts, 'Desktop remount must reuse completed layout');
+    assert.equal(await page.locator('.pane.selected .graph-svg').getAttribute('data-layout-phase'), 'settled',
+      'Desktop remount must not replay the entrance animation');
     await page.locator('.desktop-bar button').nth(1).click();
     await page.waitForFunction(id => document.querySelector('.pane.selected')?.dataset.paneId === id, newPane);
     assert.equal(await page.locator('.pane.selected textarea.code').first().inputValue(), '(define result 99)');

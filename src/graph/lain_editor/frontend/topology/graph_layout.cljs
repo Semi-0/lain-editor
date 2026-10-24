@@ -36,7 +36,8 @@
                     (.catch (fn [error]
                               (when (and @alive? (identical? controller @active) (not= "AbortError" (.-name error)))
                                 (status (str "Layout: " (.-message error)))))))))]
-      (send! [] (not (:recorded request)) false)
+      (when-not (:initial-layout request)
+        (send! [] (not (:recorded request)) false))
       {:move! #(send! % false false)
        :refine! (fn [milliseconds] (swap! settings assoc :budgetMs milliseconds) (send! [] true true))
        :spacing! (fn [factor] (swap! settings assoc :spacing factor) (send! [] true true))

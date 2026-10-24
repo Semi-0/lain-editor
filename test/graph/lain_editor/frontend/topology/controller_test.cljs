@@ -221,3 +221,40 @@
                     (is (= 1 (get-in @state/ui [:panes-ui id :topology :scenes [id "generation" "root"] :animation-progress])))))
           (.then (fn [_] (finish)))
           (.catch (fn [error] (is false (.-message error)) (finish)))))))
+
+(deftest desktop-remount-reuses-completed-layout-and-keeps-inspection-live
+  (async done
+    (let [saved @state/source id (setup!) first-scope (rx/scope) second-scope (rx/scope)
+          layouts (atom []) inspections (atom 0) observed (atom sample)
+          api (fn [request _signal]
+                (js/Promise.resolve
+                 (if (= "layout" (:op request))
+                   (do (swap! layouts conj request) (layout-result request 250))
+                   (do (swap! inspections inc) {:graph @observed}))))
+          finish (fn [] (rx/dispose! first-scope) (rx/dispose! second-scope)
+                       (reset! state/source saved) (done))]
+      (controller/attach! first-scope id {:api! api})
+      (-> (flush! (fn []
+                    (is (= 1 (count @layouts)))
+                    (swap! state/ui assoc-in [:panes-ui id :topology :scenes [id "generation" "root"] :animation-progress] 0.4)
+                    (rx/dispose! first-scope)
+                    (controller/attach! second-scope id {:api! api})))
+          (.then (fn [] (flush! (fn []
+                                 (is (= 1 (count @layouts)) "Desktop remount reuses matching completed geometry")
+                                 (is (= 250 (get-in (first (model/scenes (state/snapshot @state/source) id)) [:points "a" :x])))
+                                 (is (= 1 (get-in @state/ui [:panes-ui id :topology :scenes [id "generation" "root"] :animation-progress]))
+                                     "Remount settles an interrupted animation without restarting it")
+                                 (reset! observed (-> sample (assoc :semanticObservation "next-observation")
+                                                     (assoc-in [:nodes 0 :valueGrid 0 :value] "2")))
+                                 (swap! state/tick inc)))))
+          (.then (fn [] (flush! (fn []
+                                 (is (= 1 (count @layouts)) "Value updates that fit existing cards preserve geometry")
+                                 (is (= "2" (get-in (model/response (state/snapshot @state/source) id)
+                                                    [:graph :nodes 0 :valueGrid 0 :value])))
+                                 (is (>= @inspections 3) "Live inspections continue after remount")
+                                 (reset! observed (assoc-in @observed [:nodes 0 :label] "a much longer visible node label"))
+                                 (swap! state/tick inc)))))
+          (.then (fn [] (flush! (fn []
+                                 (is (= 2 (count @layouts)) "A real geometry change still requests layout")))))
+          (.then (fn [_] (finish)))
+          (.catch (fn [error] (is false (.-message error)) (finish)))))))
