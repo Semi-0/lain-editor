@@ -288,6 +288,7 @@
       (:value :cell :graph) (s/set-display! target :mode (name action))
       (:upstream :downstream :both) (s/set-display! target :direction (name action))
       :toggle-fullscreen (dispatch! [:dom/fullscreen target])
+      :visualizer-settings (reset! s/palette {:open? true :target target :view :visualizer :query "" :active 0})
       :toggle-visualizer (toggle-presentation! target :hidden)
       :toggle-fill (toggle-presentation! target :fill)
       :layer-settings (toggle-panel! target :layers "input[aria-label='Output binding']")

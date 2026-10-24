@@ -29,16 +29,19 @@
     (walk/prewalk
      (fn [value]
        (if (and (vector? value) (= 1 (count value))
-                (keyword? (first value)) (= "event" (namespace (first value))))
+                (contains? #{:event/native :event/key :event/target
+                             :event/target.value :event/target.checked
+                             :event/target.files :event/target.open} (first value)))
          (resolve-value (first value))
          (if (keyword? value) (resolve-value value) value)))
      data)))
 
 (defn- set-measurements! [id root]
-  (let [code (.querySelector root ".source-area")
-        result (.querySelector root ".value-view")
-        value {:code-height (if code (.-scrollHeight code) 0)
-               :result-height (if result (.-scrollHeight result) 0)}]
+  ;; Reserve the visible planes, not the scrollable contents of their editors.
+  (let [code (.querySelector root ".layer-code")
+        result (.querySelector root ".layer-result")
+        value {:code-height (if code (.-height (.getBoundingClientRect code)) 0)
+               :result-height (if result (.-height (.getBoundingClientRect result)) 0)}]
     (when (not= value (get-in @s/ui [:panes-ui id :measurements]))
       (swap! s/ui assoc-in [:panes-ui id :measurements] value))))
 
@@ -48,7 +51,7 @@
     (swap! pane-scopes assoc id owner)
     (when (exists? js/ResizeObserver)
       (let [observer (js/ResizeObserver. (fn [_] (set-measurements! id root)))]
-        (doseq [element (array-seq (.querySelectorAll root ".source-area, .value-view"))]
+        (doseq [element (array-seq (.querySelectorAll root ".layer-code, .layer-result"))]
           (.observe observer element))
         (rx/own! owner #(.disconnect observer))))
     (when-let [shell (.querySelector root ".topology-fullscreen-shell")]
@@ -107,6 +110,38 @@
       (swap! s/ui update-in [:panes-ui id] dissoc :fullscreen-error)
       (fullscreen/toggle! js/document target #(swap! s/ui assoc-in [:panes-ui id :fullscreen-error] %)))))
 
+(defn- visualizer-resize! [id event]
+  (.preventDefault event)
+  (let [handle (.-currentTarget event)
+        bounds (.getBoundingClientRect (.-parentElement handle))
+        owner (rx/scope)
+        pointer (.-pointerId event)
+        move! (fn [event]
+                (when (pos? (.-height bounds))
+                  (let [size (- 100 (* 100 (/ (- (.-clientY event) (.-top bounds)) (.-height bounds))))]
+                    (events/dispatch! [:visualizer/size id (max 10 (min 90 size))]))))
+        finish! (fn [_] (rx/dispose! owner))]
+    (.setPointerCapture handle pointer)
+    (dom/listen! owner handle "pointermove" move!)
+    (dom/listen! owner handle "pointerup" finish!)
+    (dom/listen! owner handle "pointercancel" finish!)
+    (dom/listen! owner handle "lostpointercapture" finish!)
+    (rx/own! owner #(when (.hasPointerCapture handle pointer) (.releasePointerCapture handle pointer)))
+    (when-let [pane-owner (get @pane-scopes id)]
+      (rx/own! pane-owner #(rx/dispose! owner)))))
+
+(defn- visualizer-resize-key! [id event]
+  (let [size (get-in @s/ui [:panes-ui id :graph-size] 54)
+        next-size (case (.-key event)
+                    "ArrowUp" (+ size 5)
+                    "ArrowDown" (- size 5)
+                    "Home" 90
+                    "End" 10
+                    nil)]
+    (when (some? next-size)
+      (.preventDefault event)
+      (events/dispatch! [:visualizer/size id (max 10 (min 90 next-size))]))))
+
 (defn dispatch! [[action & args :as event]]
   (case action
     :dom/pane-mounted (apply pane-mounted! args)
@@ -116,6 +151,8 @@
     :dom/modal-open (modal! (first args) true)
     :dom/focus-pane (dom/focus-pane! (first args))
     :dom/fullscreen (fullscreen! (first args))
+    :dom/visualizer-resize (apply visualizer-resize! args)
+    :dom/visualizer-resize-key (apply visualizer-resize-key! args)
     :workspace/divider-start (apply divider-start! args)
     :file/open-key (let [event (first args)]
                      (when (contains? #{"Enter" " "} (.-key event))

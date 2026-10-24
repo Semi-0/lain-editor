@@ -56,7 +56,10 @@
 (defn pane-view [vm pane index]
   (let [id (:id pane) pane-ui (get (:panes-ui vm) id {})
         mode (block-display/effective-mode pane-ui)
-        presented (block-display/presented-pane pane mode)]
+        presented (block-display/presented-pane pane mode)
+        visible-layers (filter :visible (layers/for-pane presented))
+        resizable? (and (= "code" (:id (first visible-layers))) (> (count visible-layers) 1))
+        graph-size (get pane-ui :graph-size 54)]
     [:section
      {:replicant/key id :class (cond-> ["pane"] (= id (:selected-id vm)) (conj "selected"))
       :data-pane-id id :tabindex 0 :aria-label (str "Editor " (inc index))
@@ -74,12 +77,21 @@
        [:span.fullscreen-status {:role "status" :aria-label "Fullscreen block visualizer status"}
         (:fullscreen-error pane-ui)]
        [:div.topology-content.topology-fullscreen-content
-        (into [:div (composition/stage-properties presented (:measurements pane-ui))]
-              (map-indexed
+        (cond->
+         (into [:div (cond-> (composition/stage-properties presented (:measurements pane-ui))
+                       (:graph-size pane-ui) (assoc-in [:style :--code-size] (str (- 100 graph-size) "%")))]
+               (map-indexed
                (fn [layer-index layer]
                  [:div (composition/plane-properties presented layer layer-index)
                   (layer-view vm pane index layer)])
-               (layers/for-pane presented)))]]]
+                (layers/for-pane presented)))
+          resizable?
+          (conj [:div.visualizer-divider
+                 {:role "separator" :tabindex 0 :aria-label "Resize graphical view"
+                  :aria-orientation "horizontal" :aria-valuemin 10 :aria-valuemax 90
+                  :aria-valuenow graph-size
+                  :on {:pointerdown [[:dom/visualizer-resize id [:event/native]]]
+                       :keydown [[:dom/visualizer-resize-key id [:event/native]]]}}]))]]]
      [:div.pane-tools
       (extension-view vm pane pane-ui)
       (development-view/view pane pane-ui)

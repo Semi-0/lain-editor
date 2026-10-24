@@ -23,6 +23,15 @@
 (defn- element-with-label [tree tag label]
   (first (filter #(= label (:aria-label (second %))) (elements tree tag))))
 
+(deftest visualizer-settings-live-in-the-command-palette
+  (let [vm (-> (render-input "draft")
+               (assoc-in [:palette :view] :visualizer)
+               (assoc-in [:panes-ui "a" :graph-size] 75))
+        tree (palette/view vm)
+        size (element-with-label tree :input "Graphical view size")]
+    (is (= 75 (get-in size [1 :value])))
+    (is (nil? (element-with-label tree :input "Search commands")))))
+
 (deftest source-view-is-a-pure-value-with-stable-editor-identity
   (let [before (render-input "first") after (render-input "second")
         a (workspace/view before) b (workspace/view after)

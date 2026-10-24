@@ -42,5 +42,4 @@
 
 (defn view [vm id scene]
   [:div {:class "value-view-composition" :style {:flex "1 1 0" :min-height 0}}
-   (controls vm id (:source scene))
    [:div {:class "value-view-canvas" :style {:flex "1 1 0" :min-height 0}} (graph/view id scene)]])

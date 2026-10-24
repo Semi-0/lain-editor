@@ -189,6 +189,7 @@
    [:value "Show value"] [:cell "Show cell details"] [:graph "Show topology"]
    [:upstream "Trace upstream"] [:downstream "Trace downstream"] [:both "Trace both directions"]
    [:toggle-fullscreen "Toggle fullscreen visualizer"]
+   [:visualizer-settings "Visualizer settings…"]
    [:toggle-visualizer "Hide or show visualizer"]
    [:toggle-fill "Fill or restore visualizer"]
    [:layer-settings "Toggle display layers"] [:fit-graph "Compact topology"] [:root-graph "Return to root topology"]

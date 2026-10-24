@@ -94,6 +94,11 @@
      :palette/close (swap! s/palette assoc :open? false)
      :palette/query (swap! s/palette assoc :query a :active 0)
      :palette/key (palette-key! a)
+     :visualizer/size
+     (let [size (js/Number b)]
+       (when-not (<= 10 size 90)
+         (throw (ex-info "Graphical view size must be between 10 and 90 percent" {:size b})))
+       (swap! s/ui assoc-in [:panes-ui a :graph-size] size))
      :panel/toggle
      (do
        (when-not (contains? #{:extension :layers :development} b)

@@ -84,6 +84,13 @@ These commands reuse mounted views and do not change source, runtime state,
 saved layer preferences, or graph camera. Presentation is temporary and resets
 when the pane is remounted.
 
+Select a block and open **Visualizer settings…** with ⌘K / Ctrl+K to adjust
+node spacing, layout budget, refinement, and value folding. These controls stay
+out of the graph canvas. Resize the code and graph areas by dragging their dotted
+divider or using the **Graphical view size** slider in those settings. A focused
+divider supports Up/Down arrows and Home/End. The size is local to the pane and
+is not saved in workspace files.
+
 ### Open editor files through POST requests
 
 The running browser polls a tab-scoped command channel. List connected tabs:

@@ -173,7 +173,9 @@
                                :response {:graph sample}}}}
         rendered (html/render (view/view vm "pane"))]
     (is (re-find #"<g[^>]*class=\"graph-node\"" rendered))
-    (is (re-find #"<option[^>]*>1 second</option>" rendered))
+    (is (not (str/includes? rendered "layout-controls")))
+    (is (re-find #"<option[^>]*>1 second</option>"
+                 (html/render (graph/layout-controls "pane" ["pane" "generation" "root"] model/default-settings))))
     (is (str/includes? rendered "data-node-id=\"a\""))
     (is (not (str/includes? rendered "[[:option")))
     (is (not (str/includes? rendered "[[:g")))))

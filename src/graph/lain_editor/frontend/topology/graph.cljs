@@ -64,7 +64,6 @@
   (let [context [pane key] marker (str "arrow-" (hash key)) refs (grid/references (:nodes graph))]
     [:div {:class "graph-wrap" :replicant/key key}
      [:span {:class "layout-status"} (:status layout)]
-     (layout-controls pane key settings)
      [:div {:class "semantic-summary"} (str (count (:nodes graph)) " nodes · " (count (:edges graph)) " edges")]
      (when (or (:partial graph) (seq (:diagnostics graph)))
        [:div {:class "semantic-diagnostics"}

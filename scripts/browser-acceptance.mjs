@@ -82,6 +82,15 @@ async function paletteCommand(label) {
   await palette.waitFor({ state: 'hidden' });
 }
 
+async function visualizerSettings() {
+  await page.keyboard.press('Control+k');
+  const palette = page.locator('dialog.command-palette');
+  await palette.waitFor({ state: 'visible' });
+  await palette.getByRole('searchbox', { name: 'Search commands' }).fill('Visualizer settings');
+  await palette.getByRole('button', { name: 'Visualizer settings…', exact: true }).click();
+  await palette.locator('.visualizer-settings').waitFor({ state: 'visible' });
+}
+
 try {
   browser = await chromium.launch({ headless: process.env.LAIN_EDITOR_HEADED !== '1' });
   report.browserVersion = browser.version();
@@ -175,6 +184,8 @@ try {
     }, null, { timeout });
   });
   await check('layout selects display current settings and refine the chosen budget', async () => {
+    assert.equal(await page.locator('.pane .layout-controls,.pane .value-fold-menu').count(), 0);
+    await visualizerSettings();
     const budget = page.getByRole('combobox', { name: 'Layout time budget', exact: true });
     assert.equal(await budget.inputValue(), '1000');
     assert.equal(await budget.locator('option:checked').textContent(), '1 second');
@@ -197,6 +208,7 @@ try {
     assert.equal(result.ok(), true);
     assert.equal((await result.json()).ok, true);
     report.selects = { defaultBudgetMs: 1000, selectedRefinementBudgetMs: 3000 };
+    await page.keyboard.press('Escape');
     await page.waitForFunction(() => document.querySelector('.pane.selected .graph-svg')?.dataset.layoutPhase === 'settled', null, { timeout });
   });
   const camera = svg.locator(':scope > g');
@@ -479,7 +491,8 @@ try {
     await page.getByRole('button', { name: 'Close node view', exact: true }).click();
   });
   await check('fold cell selection survives a desktop remount', async () => {
-    const menu = page.locator('.pane.selected .value-fold-menu').first();
+    await visualizerSettings();
+    const menu = page.locator('.visualizer-settings .value-fold-menu').first();
     if (!(await menu.evaluate(element => element.open))) {
       await menu.locator(':scope > summary').click();
     }
@@ -490,11 +503,13 @@ try {
     assert.ok(alternative, 'the recorded semantic graph must provide multiple inspectable cells');
     await select.selectOption(alternative.value);
     assert.equal(await select.inputValue(), alternative.value);
+    await page.keyboard.press('Escape');
     await page.locator('.desktop-bar button').nth(0).click();
     await page.waitForFunction(() => document.querySelector('.pane.selected')?.dataset.paneId === 'amb-search');
     await page.locator('.desktop-bar button').nth(2).click();
     await page.waitForFunction(() => document.querySelector('.pane.selected')?.dataset.paneId === 'amb-replay');
-    const restoredMenu = page.locator('.pane.selected .value-fold-menu').first();
+    await visualizerSettings();
+    const restoredMenu = page.locator('.visualizer-settings .value-fold-menu').first();
     if (!(await restoredMenu.evaluate(element => element.open))) {
       await restoredMenu.locator(':scope > summary').click();
     }
@@ -503,6 +518,7 @@ try {
     assert.equal(await restored.locator('option:checked').textContent(), alternative.label);
     report.selects.restoredFoldCell = alternative.value;
     await restoredMenu.locator(':scope > summary').click();
+    await page.keyboard.press('Escape');
   });
   await check('no browser errors were reported', async () => {
     assert.deepEqual(report.pageErrors, []);
