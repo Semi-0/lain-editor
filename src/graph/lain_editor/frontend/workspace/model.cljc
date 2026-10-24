@@ -201,7 +201,8 @@
     error error
     (nil? (:executedSource p)) "Not run"
     (or (not= (:source p) (:executedSource p)) (extensions-edited? p)) "Edited · ⌘Enter / Ctrl+Enter to run"
-    :else (str "Running · " (count (:extensions p)) " extensions")))
+    :else (str "Ready · " (count (:extensions p)) " extensions"
+               (when (= false (:autoRefresh p)) " · manual refresh"))))
 
 (def command-specs
   [[:run "Run block"] [:load "Load Lain file…"] [:save-block "Save block to file…"]
@@ -216,7 +217,7 @@
    [:toggle-visualizer "Hide or show visualizer"]
    [:toggle-fill "Fill or restore visualizer"]
    [:layer-settings "Toggle display layers"] [:fit-graph "Compact topology"] [:root-graph "Return to root topology"]
-   [:refresh "Refresh output"] [:edit-extension "Toggle extension editor"] [:extend "Apply extension"]
+   [:refresh "Refresh output"] [:toggle-auto-refresh "Pause automatic refresh"] [:edit-extension "Toggle extension editor"] [:extend "Apply extension"]
    [:development-settings "Toggle incremental development"]
    [:new-workspace "New workspace"] [:save "Save workspace"]
    [:save-as "Save workspace as…"] [:open "Open workspace JSON…"]])
@@ -225,7 +226,8 @@
   (let [p (pane document id)]
     (into
      (mapv (fn [[action label]]
-             {:action action :label label :target id
+             {:action action :label (if (and (= action :toggle-auto-refresh) (= false (:autoRefresh p)))
+                                      "Resume automatic refresh" label) :target id
               :enabled (and (not busy?) (some? p)
                             (case action
                               :detach-session (and (contains? generations id)

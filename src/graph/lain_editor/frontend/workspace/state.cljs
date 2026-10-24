@@ -111,7 +111,8 @@
      (let [generation (get generations id) mode (layers/inspection-mode p)]
        (when (and generation mode)
          {:pane id :generation generation :display (assoc (:display p) :mode mode)
-          :parent (when (= "graph" mode) (get expansions id)) :refresh (get refreshes id 0)})))
+          :parent (when (= "graph" mode) (get expansions id)) :refresh (get refreshes id 0)
+          :autoRefresh (get p :autoRefresh true)})))
    descriptor generations expansions refreshes))
 
 (defn refresh! [id]
