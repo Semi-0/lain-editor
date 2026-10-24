@@ -34,13 +34,13 @@
     [:select {:aria-label "Node spacing" :title "Scales layout footprints, edge targets and gaps; card sizes stay unchanged."
               :value (str (:spacing settings))
               :on {:change [[:graph/spacing pane key [:event/target.value]]]}}
-     (map (fn [[factor label]] [:option {:replicant/key factor :value (str factor)} label])
+     (map (fn [[factor label]] [:option {:replicant/key factor :value (str factor) :selected (= factor (:spacing settings))} label])
            [[1 "Normal (1×)"] [1.5 "Roomy (1.5×)"] [2 "Wide (2×)"] [3 "Very wide (3×)"]])]]
    [:label "Layout budget "
     [:select {:aria-label "Layout time budget" :title "Stops early at movement tolerance; time checks occur between solver batches."
               :value (str (:budgetMs settings))
               :on {:change [[:graph/budget pane key [:event/target.value]]]}}
-     (map (fn [[ms label]] [:option {:replicant/key ms :value (str ms)} label])
+     (map (fn [[ms label]] [:option {:replicant/key ms :value (str ms) :selected (= ms (:budgetMs settings))} label])
            [[250 "250 ms"] [1000 "1 second"] [3000 "3 seconds"] [10000 "10 seconds"]])]]
    [:button {:on {:click [[:graph/refine pane key]]}} "Refine layout"]])
 

@@ -87,3 +87,12 @@
     (is (str/includes? palette-html ">Run block</button>"))
     (is (not (str/includes? rendered "[[:")))
     (is (not (str/includes? palette-html "[[:")))))
+
+(deftest persisted-stack-mode-selects-its-own-option
+  (doseq [mode ["stack" "overlay"]]
+    (let [p (assoc (model/new-pane "a") :layerMode mode)
+          view (layer-panel/view p false {})
+          control (element-with-label view :select "Layer composition")
+          selected (filter #(get-in % [1 :selected]) (elements control :option))]
+      (is (= mode (get-in control [1 :value])))
+      (is (= [mode] (mapv #(get-in % [1 :value]) selected))))))

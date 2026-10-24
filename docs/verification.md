@@ -27,3 +27,9 @@ Fresh-checkout reproduction passed: locked npm install, 32 JVM/shared/architectu
 A separate clean backend candidate with copied frontend/shared source removed successfully built both the application and frontend tests through the public build provider. Its 37 focused JVM tests passed 252 assertions (development runtime, graph layout, source-file HTTP effects, and slot spawning). Prepublication validation used explicit temporary local coordinates; committed integration uses pinned Git coordinates. A dedicated test subproject replaced deprecated classpath entries outside the build subproject. The delegated CLJS/Node run again passed 104 tests/836 assertions.
 
 The complete backend matrix was not claimed green: the known child-topology assertion remains unchanged, and unrelated working-tree runtime/benchmark work was excluded. No clojure-lsp or clj-kondo result is claimed.
+
+## Select-control follow-up
+
+Final visual inspection found that an HTML select could display its first option while its declarative value held another choice. Explicit option selection now follows the existing view-state inputs for layout budget/spacing, composition mode and value-fold cell selection. Domain defaults and layout policy are unchanged.
+
+The follow-up optimized build and 107 CLJS tests/850 assertions passed. Real-browser acceptance passed 21 checks at 2026-10-24 01:20:47–01:21:25 UTC, including default 1000 ms / 1 second agreement, a 3000 ms budget choice that performs no work until explicit refinement, persisted Stack selection, and a non-first fold selection surviving remount. Recursive learning, eight-frame replay with zero live detail reads, 29-unit observed node clearance and all earlier scenarios passed again. No browser errors were observed. The separately classified headless Escape limitation remains recorded.

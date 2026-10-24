@@ -25,7 +25,7 @@
         [:button {:on {:click [[:value/unfold-all id]]}} "Unfold all values"]
         [:select {:aria-label "Cell value to fold or unfold" :value selected
                   :on {:change [[:value/select-cell id [:event/target.value]]]}}
-         (map (fn [{:keys [cell label]}] [:option {:replicant/key cell :value cell} label]) nodes)]
+         (map (fn [{:keys [cell label]}] [:option {:replicant/key cell :value cell :selected (= cell selected)} label]) nodes)]
         [:div {:class "value-fold-fields"}
          (map (fn [section]
                  (let [fields (filter #(and (= selected (:cell %)) (= section (:section %))) entries)]

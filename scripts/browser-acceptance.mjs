@@ -15,6 +15,7 @@ const requiredChecks = [
   'command palette opens and dismisses',
   'run reaches the real configured runtime',
   'topology renders runtime nodes',
+  'layout selects display current settings and refine the chosen budget',
   'zoom remains stable across inspection refreshes',
   'pan remains stable across inspection refreshes',
   'node detail opens and closes without changing the camera',
@@ -26,7 +27,9 @@ const requiredChecks = [
   'legacy example workspace restores through its public file input',
   'multi-node topology keeps exact rendered cards apart',
   'learned no-good values retain recursive structural rendering',
+  'persisted stack composition selects the matching option',
   'recorded learning replay scrubs and inspects frozen values',
+  'fold cell selection survives a desktop remount',
   'no browser errors were reported',
 ];
 const report = { url, startedAt: new Date().toISOString(), requiredChecks, checks: [], pageErrors: [], consoleErrors: [], passed: false };
@@ -170,6 +173,31 @@ try {
       const graph = document.querySelector('.pane.selected .graph-svg');
       return graph !== null && graph.dataset.layoutPhase === 'settled';
     }, null, { timeout });
+  });
+  await check('layout selects display current settings and refine the chosen budget', async () => {
+    const budget = page.getByRole('combobox', { name: 'Layout time budget', exact: true });
+    assert.equal(await budget.inputValue(), '1000');
+    assert.equal(await budget.locator('option:checked').textContent(), '1 second');
+    assert.equal(layoutRequests[0].budgetMs, 1000);
+    const before = layoutRequests.length;
+    await budget.selectOption('3000');
+    assert.equal(await budget.inputValue(), '3000');
+    assert.equal(await budget.locator('option:checked').textContent(), '3 seconds');
+    await page.waitForTimeout(100);
+    assert.equal(layoutRequests.length, before, 'selecting a budget must not compute a new layout');
+    const response = page.waitForResponse(incoming => {
+      if (new URL(incoming.url()).pathname !== '/api' || incoming.request().method() !== 'POST') {
+        return false;
+      }
+      const command = incoming.request().postDataJSON();
+      return command.op === 'layout' && command.refine === true && command.budgetMs === 3000;
+    });
+    await page.getByRole('button', { name: 'Refine layout', exact: true }).click();
+    const result = await response;
+    assert.equal(result.ok(), true);
+    assert.equal((await result.json()).ok, true);
+    report.selects = { defaultBudgetMs: 1000, selectedRefinementBudgetMs: 3000 };
+    await page.waitForFunction(() => document.querySelector('.pane.selected .graph-svg')?.dataset.layoutPhase === 'settled', null, { timeout });
   });
   const camera = svg.locator(':scope > g');
   await check('zoom remains stable across inspection refreshes', async () => {
@@ -397,6 +425,15 @@ try {
       structuralBranches: element.querySelectorAll('.value-tree-branch').length,
     }));
   });
+  await check('persisted stack composition selects the matching option', async () => {
+    await paletteCommand('Toggle display layers');
+    const composition = page.getByRole('combobox', { name: 'Layer composition', exact: true });
+    assert.equal(await composition.inputValue(), 'stack');
+    assert.equal(await composition.locator('option:checked').textContent(), 'Stack');
+    assert.equal(await page.locator('.pane.selected .layer-stage').evaluate(element => element.classList.contains('stack')), true);
+    report.selects.persistedLayerMode = await composition.inputValue();
+    await paletteCommand('Toggle display layers');
+  });
   await check('recorded learning replay scrubs and inspects frozen values', async () => {
     await page.locator('.desktop-bar button').nth(2).click();
     await page.locator('.pane.selected .replay-view').waitFor({ state: 'visible' });
@@ -440,6 +477,32 @@ try {
       liveNodeReads: liveNodeReads.length,
     };
     await page.getByRole('button', { name: 'Close node view', exact: true }).click();
+  });
+  await check('fold cell selection survives a desktop remount', async () => {
+    const menu = page.locator('.pane.selected .value-fold-menu').first();
+    if (!(await menu.evaluate(element => element.open))) {
+      await menu.locator(':scope > summary').click();
+    }
+    const select = page.getByRole('combobox', { name: 'Cell value to fold or unfold', exact: true });
+    const options = await select.locator('option').evaluateAll(elements => elements.map(element => ({ value: element.value, label: element.textContent })));
+    const original = await select.inputValue();
+    const alternative = options.find(option => option.value !== original);
+    assert.ok(alternative, 'the recorded semantic graph must provide multiple inspectable cells');
+    await select.selectOption(alternative.value);
+    assert.equal(await select.inputValue(), alternative.value);
+    await page.locator('.desktop-bar button').nth(0).click();
+    await page.waitForFunction(() => document.querySelector('.pane.selected')?.dataset.paneId === 'amb-search');
+    await page.locator('.desktop-bar button').nth(2).click();
+    await page.waitForFunction(() => document.querySelector('.pane.selected')?.dataset.paneId === 'amb-replay');
+    const restoredMenu = page.locator('.pane.selected .value-fold-menu').first();
+    if (!(await restoredMenu.evaluate(element => element.open))) {
+      await restoredMenu.locator(':scope > summary').click();
+    }
+    const restored = page.getByRole('combobox', { name: 'Cell value to fold or unfold', exact: true });
+    assert.equal(await restored.inputValue(), alternative.value);
+    assert.equal(await restored.locator('option:checked').textContent(), alternative.label);
+    report.selects.restoredFoldCell = alternative.value;
+    await restoredMenu.locator(':scope > summary').click();
   });
   await check('no browser errors were reported', async () => {
     assert.deepEqual(report.pageErrors, []);

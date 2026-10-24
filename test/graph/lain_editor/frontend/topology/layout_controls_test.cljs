@@ -46,3 +46,13 @@
                    (rx/dispose! scope)
                    (done)))
           (.catch (fn [error] (rx/dispose! scope) (is false (.-message error)) (done)))))))
+
+(deftest rendered-options-own-the-selected-layout-settings
+  (doseq [[budget spacing] [[1000 1] [3000 2] [10000 3]]]
+    (let [view (controls/view "pane" "scope" {:budgetMs budget :spacing spacing})
+          elements (filter #(and (vector? %) (= :select (first %))) (tree-seq sequential? seq view))
+          selected (into {} (map (fn [[_ attributes options]]
+                                  [(:aria-label attributes)
+                                   (mapv #(get-in % [1 :value]) (filter #(get-in % [1 :selected]) options))])) elements)]
+      (is (= [(str budget)] (get selected "Layout time budget")))
+      (is (= [(str spacing)] (get selected "Node spacing"))))))

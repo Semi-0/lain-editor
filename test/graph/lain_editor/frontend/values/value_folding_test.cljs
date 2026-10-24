@@ -106,3 +106,16 @@
     (is (not-any? fn? (tree-seq coll? seq closed-view)) "Views carry event data rather than callbacks")
     (is (= vm (dissoc folded :panes-ui)))
     (is (= open-view (topology/view vm "pane")) "Rendering has no hidden state")))
+
+(deftest restored-fold-selection-marks-the-corresponding-cell-option
+  (let [source {:nodes [{:id "a" :kind "cell" :label "A" :valueGrid [{:key "A-only" :value "1"}]}
+                        {:id "b" :kind "cell" :label "B" :valueGrid [{:key "B-only" :value "2"}]}]}]
+    (doseq [cell ["b" "a"]]
+      (let [vm {:panes-ui {"pane" {:topology {:selected-cell cell}}}}
+            controls (value-view/controls vm "pane" source)
+            elements (filter #(and (vector? %) (keyword? (first %))) (tree-seq sequential? seq controls))
+            control (first (filter #(= :select (first %)) elements))
+            options (filter #(= :option (first %)) elements)
+            selected (filter #(get-in % [1 :selected]) options)]
+        (is (= cell (get-in control [1 :value])))
+        (is (= [cell] (mapv #(get-in % [1 :value]) selected)))))))

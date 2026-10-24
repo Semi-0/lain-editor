@@ -18,7 +18,7 @@
                :on {:click [[:layer/move id layer-id 1]]}} "↓"]]))
 
 (defn view [pane busy? pane-ui]
-  (let [id (:id pane) config (layers/for-pane pane)]
+  (let [id (:id pane) config (layers/for-pane pane) mode (get pane :layerMode "overlay")]
     [:details.options.layer-panel
      {:replicant/key [id :layer-panel]
       :open (boolean (get-in pane-ui [:panels :layers]))
@@ -27,10 +27,10 @@
      [:div.popover.layer-popup
       [:div.layer-heading "Layers · top → bottom"]
       [:select {:aria-label "Layer composition" :disabled busy?
-                :value (get pane :layerMode "overlay")
+                :value mode
                 :on {:change [[:layer/mode id [:event/target.value]]]}}
-       [:option {:value "overlay"} "Overlay"]
-       [:option {:value "stack"} "Stack"]]
+       [:option {:value "overlay" :selected (= mode "overlay")} "Overlay"]
+       [:option {:value "stack" :selected (= mode "stack")} "Stack"]]
       (into [:div.layer-list]
             (map-indexed #(row-view id %2 %1 (count config) busy?) config))
       [:label.layer-binding "Output binding"]
