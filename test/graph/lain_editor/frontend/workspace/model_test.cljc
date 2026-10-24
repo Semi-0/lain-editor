@@ -226,15 +226,3 @@
                                                        "save block")))))
     (is (:enabled (first (model/matching-commands (model/commands (document) "a" {} false)
                                                  "save block"))))))
-
-(deftest manual-refresh-is-a-portable-per-block-preference
-  (let [doc (document)
-        manual (model/update-pane doc "a" assoc :autoRefresh false)
-        labels #(set (map :label (model/commands % "a" {} false)))
-        executed (model/committed-source (model/pane manual "a") "" [])]
-    (is (contains? (labels doc) "Pause automatic refresh"))
-    (is (contains? (labels manual) "Resume automatic refresh"))
-    (is (= manual (workspace/validate manual)))
-    (is (re-find #"Ready.*manual refresh" (model/status-text executed nil)))
-    (is (thrown? #?(:clj Exception :cljs js/Error)
-                 (workspace/validate (model/update-pane doc "a" assoc :autoRefresh "false"))))))

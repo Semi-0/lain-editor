@@ -32,8 +32,6 @@
   (when (contains? pane :layers) (layers/validate! (:layers pane)))
   (when (contains? pane :layerMode)
     (ensure! (contains? #{"overlay" "stack"} (:layerMode pane)) "Unknown layer composition"))
-  (when (contains? pane :autoRefresh)
-    (ensure! (boolean? (:autoRefresh pane)) "autoRefresh must be a boolean"))
   (when (contains? pane :development)
     (development/validate-portable-model! (:development pane)))
   pane)
