@@ -408,6 +408,8 @@
       :fit-graph (dispatch! [:graph/fit target])
       :root-graph (s/transact! (fn [] (swap! s/expansions dissoc target) (s/refresh! target)))
       :refresh (s/transact! (fn [] (swap! s/expansions dissoc target) (s/refresh! target)))
+      :toggle-auto-refresh
+      (s/change-pane! target update :autoRefresh #(= false %))
       :edit-extension (toggle-panel! target :extension ".extension textarea")
       :extend (run! target "extend")
       :development-settings (toggle-panel! target :development nil)
