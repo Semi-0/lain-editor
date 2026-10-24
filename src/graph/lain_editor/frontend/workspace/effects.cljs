@@ -45,33 +45,73 @@
            (and (some? (model/pane @s/workspace pane))
                 (= generation (get @s/generations pane))))))
 
+(defn connected? [] (= :connected (:status @s/connection)))
+
+(defn- cancelled-error []
+  (ex-info "Remote connection paused or request superseded" {:cancelled? true}))
+
+(defn- pause! [status]
+  ;; Invalidate the epoch before promise callbacks can apply any late result.
+  (dispose!)
+  (reset! s/connection {:status status}))
+
+(defn- request! [command external-signal session-check?]
+  (if (and (not session-check?) (not (connected?)))
+    (js/Promise.reject (cancelled-error))
+    (let [id (str (random-uuid)) epoch (lifecycle-token)
+          pane (when-not (= "reopen-session" (:op command)) (:pane command))
+          generation (get @s/generations pane)
+          controller (js/AbortController.) signal (.-signal controller)
+          abort! #(.abort controller)
+          current? #(and (not (.-aborted signal)) (current-result? epoch pane generation))]
+      (when external-signal
+        (.addEventListener external-signal "abort" abort! #js {:once true})
+        (when (.-aborted external-signal) (abort!)))
+      (swap! transport assoc-in [:controllers id] controller)
+      (-> (js/fetch (if session-check? "/auth/session" "/api")
+                    (if session-check?
+                      #js {:method "GET" :signal signal :cache "no-store" :redirect "error"}
+                      #js {:method "POST" :signal signal :redirect "error"
+                           :headers #js {"Content-Type" "application/json"}
+                           :body (js/JSON.stringify (clj->js command))}))
+          (.then (fn [response]
+                   (when-not (current?) (throw (cancelled-error)))
+                   (case (.-status response)
+                     401 (do (pause! :expired) (throw (cancelled-error)))
+                     403 (do (pause! :forbidden) (throw (cancelled-error)))
+                     502 (throw (js/Error. "Backend unavailable or authentication configuration failure (502)"))
+                     (if (and (false? (.-ok response)) (not= 400 (.-status response)))
+                       (throw (js/Error. (str "Editor HTTP " (.-status response))))
+                       (.json response)))))
+          (.then (fn [body]
+                   (when-not (current?) (throw (cancelled-error)))
+                   (if (.-ok body)
+                     (js->clj (.-result body) :keywordize-keys true)
+                     (throw (js/Error. (.-error body))))))
+          (.finally (fn []
+                      (when external-signal
+                        (.removeEventListener external-signal "abort" abort!))
+                      (swap! transport update :controllers dissoc id)))))))
+
 (defn api!
   ([command] (api! command nil))
-  ([command signal]
-   (let [id (str (random-uuid)) epoch (:epoch @transport)
-         pane (when-not (= "reopen-session" (:op command)) (:pane command))
-         generation (get @s/generations pane)
-         controller (when-not signal (js/AbortController.))
-         signal (or signal (.-signal controller))]
-     (swap! transport assoc-in [:controllers id] controller)
-     (-> (js/fetch "/api" #js {:method "POST" :signal signal
-                               :headers #js {"Content-Type" "application/json"}
-                               :body (js/JSON.stringify (clj->js command))})
-         (.then (fn [response]
-                  (if (and (false? (.-ok response)) (not= 400 (.-status response)))
-                    (throw (js/Error. (str "Editor HTTP " (.-status response))))
-                    (.json response))))
-         (.then (fn [body]
-                  (when-not (and (not (.-aborted signal))
-                                 (current-result? epoch pane generation))
-                    (throw (ex-info "Editor request was superseded" {:cancelled? true})))
-                  (if (.-ok body)
-                    (js->clj (.-result body) :keywordize-keys true)
-                    (throw (js/Error. (.-error body))))))
-         (.finally #(swap! transport update :controllers dissoc id))))))
+  ([command signal] (request! command signal false)))
+
+(defn resume! []
+  (let [epoch (lifecycle-token)]
+    (-> (request! nil nil true)
+        (.then (fn [session]
+                 (when (and (current-lifecycle? epoch) (:authenticated session))
+                   (s/transact!
+                    #(do (reset! s/connection {:status :connected})
+                         (reset! s/message "Connection resumed · interrupted operations were not repeated")
+                         (swap! s/tick inc))))))
+        (.catch (fn [error]
+                  (when-not (cancelled? error)
+                    (swap! s/connection assoc :message (.-message error))))))))
 
 (defn operation! [id action]
-  (if @s/busy?
+  (if (or @s/busy? (not (connected?)))
     (js/Promise.resolve nil)
     (let [token (str (random-uuid)) epoch (lifecycle-token)
           current? #(and (= token @operation-token) (current-lifecycle? epoch))]
@@ -287,6 +327,16 @@
   (if-let [path @s/workspace-path]
     (operation! nil #(save-workspace-to! path true))
     (save-workspace-as!)))
+
+(defn export-workspace! []
+  (let [blob (js/Blob. #js [(js/JSON.stringify (clj->js @s/workspace) nil 2)]
+                       #js {:type "application/json"})
+        url (.createObjectURL js/URL blob)
+        link (.createElement js/document "a")]
+    (set! (.-href link) url)
+    (set! (.-download link) "lain-workspace.json")
+    (.click link)
+    (js/setTimeout #(.revokeObjectURL js/URL url) 1000)))
 
 (defn persist! [document]
   (try

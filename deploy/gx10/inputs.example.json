@@ -1,0 +1,7 @@
+{
+  "gx10_address": "",
+  "client_subnet": "",
+  "gateway_credential_file": "",
+  "smtp": {"address": "", "sender": "", "username": "", "startup_check_address": ""},
+  "operators": [{"username": "", "displayname": "", "email": "", "password_hash": ""}]
+}

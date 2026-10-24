@@ -130,3 +130,98 @@ test('configuration rejects non-loopback listeners and invalid backend origins',
   await assert.rejects(startDevServer({ backend: 'file:///tmp/backend' }), /HTTP/);
   await assert.rejects(startDevServer({ backend: 'http://127.0.0.1/private' }), /origin/);
 });
+
+async function protectedOptions(t) {
+  const root = await fixture(t);
+  const gatewayCredentialFile = join(root, 'gateway');
+  const backendCredentialFile = join(root, 'backend');
+  await writeFile(gatewayCredentialFile, 'g'.repeat(48));
+  await writeFile(backendCredentialFile, 'b'.repeat(48));
+  return { root, mode: 'protected', publicOrigin: 'https://editor.lain.home.arpa', gatewayCredentialFile, backendCredentialFile };
+}
+const gatewayHeaders = { 'x-lain-gateway': 'g'.repeat(48), origin: 'https://editor.lain.home.arpa' };
+
+test('protected startup rejects incomplete configuration, malformed secrets and remote backends', async t => {
+  const options = await protectedOptions(t);
+  for (const key of ['publicOrigin', 'gatewayCredentialFile', 'backendCredentialFile']) {
+    await assert.rejects(startDevServer({ ...options, port: 0, [key]: undefined }), /requires/);
+  }
+  for (const publicOrigin of ['http://editor.lain.home.arpa', 'https://editor.lain.home.arpa/', 'https://u:p@editor.lain.home.arpa', 'null']) {
+    await assert.rejects(startDevServer({ ...options, port: 0, publicOrigin }), /HTTPS/);
+  }
+  await assert.rejects(startDevServer({ ...options, port: 0, backend: 'http://192.168.1.2:4780' }), /loopback/);
+  await assert.rejects(startDevServer({ ...options, port: 0, mode: 'typo' }), /MODE/);
+  await assert.rejects(startDevServer({ ...options, port: 0, backendCredentialFile: options.gatewayCredentialFile }), /distinct/);
+  await writeFile(options.gatewayCredentialFile, 'invalid\nsecret');
+  await assert.rejects(startDevServer({ ...options, port: 0 }), /base64url/);
+});
+
+test('gateway protects every path and session completion never mounts the editor', async t => {
+  const application = await frontend(t, await protectedOptions(t));
+  for (const path of ['/', '/style.css', '/compiled/app.js', '/api', '/auth/session', '/auth/complete', '/unknown']) {
+    for (const credential of [undefined, 'wrong']) {
+      const headers = {};
+      if (credential) { headers['x-lain-gateway'] = credential; }
+      const response = await fetch(`${application.url}${path}`, { headers });
+      assert.equal(response.status, 403);
+      assert.ok(!(await response.text()).includes('g'.repeat(48)));
+    }
+  }
+  const complete = await fetch(`${application.url}/auth/complete`, { headers: gatewayHeaders });
+  assert.equal(complete.status, 200);
+  assert.doesNotMatch(await complete.text(), /script|app.js|id="app"/);
+  const session = await fetch(`${application.url}/auth/session`, { headers: gatewayHeaders });
+  assert.deepEqual(await session.json(), { ok: true, result: { authenticated: true } });
+  assert.equal(session.headers.get('cache-control'), 'no-store');
+});
+
+test('protected origin is exact and independent of forged host and forwarded headers', async t => {
+  let calls = 0;
+  const address = await backend(t, (request, response) => { calls++; request.resume(); response.end('{"ok":true,"result":{}}'); });
+  const application = await frontend(t, { ...await protectedOptions(t), backend: address });
+  for (const origin of [undefined, 'null', 'https://editor.lain.home.arpa/', 'http://editor.lain.home.arpa', 'https://evil.test', 'https://editor.lain.home.arpa:443']) {
+    const headers = { ...gatewayHeaders, host: 'evil.test', forwarded: 'host=editor.lain.home.arpa;proto=https', 'x-forwarded-host': 'editor.lain.home.arpa', 'x-forwarded-proto': 'https' };
+    delete headers.origin;
+    if (origin !== undefined) { headers.origin = origin; }
+    assert.equal((await rawRequest(application.url, '/api', { method: 'POST', headers, body: '{}' })).status, 403);
+  }
+  assert.equal(calls, 0);
+  assert.equal((await rawRequest(application.url, '/api', { method: 'POST', headers: { ...gatewayHeaders, host: 'evil.test' }, body: '{}' })).status, 200);
+  assert.equal(calls, 1);
+});
+
+test('protected proxy forwards only service identity and sanitizes backend auth rejection', async t => {
+  const received = [];
+  let authStatus = 401;
+  const address = await backend(t, async (request, response) => {
+    let body = '';
+    for await (const chunk of request) { body += chunk; }
+    received.push({ headers: request.headers, body });
+    response.writeHead(authStatus, { 'set-cookie': 'secret=backend', 'www-authenticate': 'Bearer private', 'x-secret': 'private' });
+    response.end('backend private credential details');
+  });
+  const application = await frontend(t, { ...await protectedOptions(t), backend: address });
+  const response = await rawRequest(application.url, '/api', { method: 'POST', body: '{"op":"run"}', headers: {
+    ...gatewayHeaders, cookie: 'session=secret', authorization: 'Bearer browser', 'remote-user': 'admin', 'remote-groups': 'admin',
+    'x-forwarded-user': 'admin', 'x-auth-request-user': 'admin', 'x-lain-custom': 'private', connection: 'x-identity', 'x-identity': 'secret',
+  } });
+  assert.equal(response.status, 502);
+  assert.deepEqual(JSON.parse(response.body), { ok: false, error: 'Backend authentication configuration failure' });
+  assert.equal(response.headers['set-cookie'], undefined);
+  assert.equal(response.headers['www-authenticate'], undefined);
+  assert.equal(response.headers['x-secret'], undefined);
+  authStatus = 403;
+  const forbidden = await rawRequest(application.url, '/api', { method: 'POST', headers: gatewayHeaders, body: '{}' });
+  assert.equal(forbidden.status, 502);
+  assert.equal(forbidden.body, response.body);
+  authStatus = 200;
+  const success = await rawRequest(application.url, '/api', { method: 'POST', headers: gatewayHeaders, body: '{}' });
+  assert.equal(success.status, 200);
+  assert.equal(success.headers['set-cookie'], undefined);
+  assert.equal(success.headers['x-secret'], undefined);
+  assert.equal(received[0].body, '{"op":"run"}');
+  assert.equal(received[0].headers.authorization, `Bearer ${'b'.repeat(48)}`);
+  for (const name of ['cookie', 'x-lain-gateway', 'remote-user', 'remote-groups', 'x-forwarded-user', 'x-auth-request-user', 'x-lain-custom', 'x-identity']) {
+    assert.equal(received[0].headers[name], undefined, name);
+  }
+});

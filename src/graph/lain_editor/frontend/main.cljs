@@ -10,7 +10,9 @@
             [graph.lain-editor.frontend.view.save-dialog :as save-view]
             [graph.lain-editor.frontend.workspace.source-save :as source-save]
             [graph.lain-editor.frontend.workspace.desktops :as desktops]
-            [graph.lain-editor.frontend.workspace.state :as s]))
+            [graph.lain-editor.frontend.workspace.state :as s]
+            [graph.lain-editor.frontend.workspace.effects :as effects]
+            [graph.lain-editor.frontend.view.connection :as connection-view]))
 
 (defonce application (atom nil))
 
@@ -22,6 +24,8 @@
        (fn []
          (doseq [[action & args :as event] (browser/interpolate context actions)]
            (case action
+             :connection/resume (effects/resume!)
+             :connection/export (effects/export-workspace!)
              :event/prevent-default (when native (.preventDefault native))
              :event/stop-propagation (when native (.stopPropagation native))
              :workspace/divider-start (browser/dispatch! event)
@@ -58,7 +62,8 @@
         scroll (when editable? [(.-scrollTop active) (.-scrollLeft active)])]
     (r/render root
               (conj (workspace-view/view view-state)
-                    (save-view/view (get-in view-state [:ui :save-dialog]))))
+                    (save-view/view (get-in view-state [:ui :save-dialog]))
+                    (connection-view/view (:connection view-state))))
     (when (and selection (identical? active (.-activeElement js/document))
                (.-isConnected active))
       (.setSelectionRange active (first selection) (second selection) (nth selection 2))
@@ -122,7 +127,7 @@
     (events/attach! owner)
     (pane-processes! owner)
     (renderer! owner root)
-    (let [timer (js/setInterval #(when (and (not @s/busy?) (not (.-hidden js/document)))
+    (let [timer (js/setInterval #(when (and (effects/connected?) (not @s/busy?) (not (.-hidden js/document)))
                                   (swap! s/tick inc)) 2000)]
       (rx/own! owner #(js/clearInterval timer)))
     (dom/listen! owner js/window "beforeunload" dispose!)))

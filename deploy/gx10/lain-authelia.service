@@ -1,0 +1,29 @@
+[Unit]
+Description=Lain LAN authentication
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=authelia
+Group=authelia
+StateDirectory=lain-authelia
+StateDirectoryMode=0700
+LoadCredential=session:/etc/lain-editor/authelia/session
+LoadCredential=storage:/etc/lain-editor/authelia/storage
+LoadCredential=smtp:/etc/lain-editor/authelia/smtp
+Environment=AUTHELIA_SESSION_SECRET_FILE=%d/session
+Environment=AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE=%d/storage
+Environment=AUTHELIA_NOTIFIER_SMTP_PASSWORD_FILE=%d/smtp
+ExecStartPre=/usr/bin/authelia config validate --config /etc/lain-editor/authelia/configuration.yml
+ExecStart=/usr/bin/authelia --config /etc/lain-editor/authelia/configuration.yml
+Restart=on-failure
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/lain-authelia
+InaccessiblePaths=/srv/lain/projects /etc/lain-editor/editor /etc/lain-editor/runtime /etc/lain-editor/caddy
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

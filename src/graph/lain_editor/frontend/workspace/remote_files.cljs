@@ -31,7 +31,7 @@
   (let [pending? (atom false) alive? (atom true) ack (atom nil)
         active (atom nil)
         poll! (fn []
-                (when (and @alive? (not @pending?) (not @s/busy?))
+                (when (and (effects/connected?) @alive? (not @pending?) (not @s/busy?))
                   (let [controller (js/AbortController.)
                         current? #(and @alive? (identical? controller @active))]
                     (reset! active controller)

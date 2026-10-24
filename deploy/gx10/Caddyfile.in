@@ -1,0 +1,49 @@
+{
+	admin off
+	auto_https disable_redirects
+}
+
+(lan) {
+	bind __GX10_ADDRESS__
+	tls internal
+	@outside not remote_ip __CLIENT_SUBNET__
+	respond @outside "Forbidden" 403
+	header Cache-Control "no-store"
+}
+
+https://auth.lain.home.arpa {
+	import lan
+	reverse_proxy 127.0.0.1:9091
+}
+
+https://editor.lain.home.arpa {
+	import lan
+	route {
+		# Never trust browser assertions of gateway or user identity.
+		request_header -X-Lain-Gateway
+		request_header -Remote-*
+		request_header -X-Auth-*
+		@api path /api /api/* /auth/session
+		handle @api {
+			forward_auth 127.0.0.1:9091 {
+				uri /api/authz/forward-auth
+				# Fetch must receive a status, never follow a login redirect.
+				@login status 3xx 401
+				handle_response @login {
+					respond "Session expired" 401
+				}
+			}
+			reverse_proxy 127.0.0.1:4781 {
+				import /etc/lain-editor/caddy/gateway-header.caddy
+			}
+		}
+		handle {
+			forward_auth 127.0.0.1:9091 {
+				uri /api/authz/forward-auth
+			}
+			reverse_proxy 127.0.0.1:4781 {
+				import /etc/lain-editor/caddy/gateway-header.caddy
+			}
+		}
+	}
+}

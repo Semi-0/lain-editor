@@ -341,3 +341,7 @@ footer { height: 31px; flex: none; display: flex; align-items: center; gap: 8px;
 .stack-scene-identity { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .stack-scene-plane-graph { height: 366px; min-height: 0; }
 .stack-scene-plane-graph > .graph-wrap { height: 100%; }
+
+.connection-notice { position: fixed; z-index: 10000; top: 12px; left: 50%; transform: translateX(-50%); max-width: 540px; padding: 16px; border: 1px solid #d9ac69; border-radius: 8px; background: #20232b; color: #fff; box-shadow: 0 4px 24px #0008; }
+.connection-notice p { margin: 8px 0; }
+.connection-notice a { color: #bcdcff; margin-right: 16px; }

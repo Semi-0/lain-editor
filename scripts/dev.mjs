@@ -1,6 +1,7 @@
 import http from 'node:http';
 import https from 'node:https';
-import { createReadStream } from 'node:fs';
+import { createReadStream, readFileSync } from 'node:fs';
+import { timingSafeEqual } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -35,7 +36,62 @@ function backendAddress(value) {
   return address;
 }
 
-function forwardedHeaders(headers, backend) {
+function protectedConfiguration(mode, publicOrigin, gatewayCredentialFile, backendCredentialFile, backend) {
+  if (!['local', 'protected'].includes(mode)) {
+    throw new Error('LAIN_EDITOR_MODE must be local or protected');
+  }
+  if (mode === 'local') {
+    return null;
+  }
+  let origin;
+  try {
+    origin = new URL(publicOrigin);
+  } catch {
+    throw new Error('Protected mode requires a public HTTPS origin');
+  }
+  if (origin.protocol !== 'https:' || origin.origin !== publicOrigin) {
+    throw new Error('Protected mode requires an exact public HTTPS origin without path or credentials');
+  }
+  if (!['127.0.0.1', '[::1]', 'localhost'].includes(backend.hostname)) {
+    throw new Error('Protected backend must use a loopback host');
+  }
+  function credential(file, name) {
+    let value;
+    try {
+      value = readFileSync(file, 'utf8').trim();
+    } catch {
+      throw new Error(`Protected mode requires a readable ${name} credential file`);
+    }
+    if (!/^[A-Za-z0-9_-]{32,}$/.test(value)) {
+      throw new Error(`${name} credential must contain at least 32 base64url characters`);
+    }
+    return value;
+  }
+  const gateway = credential(gatewayCredentialFile, 'gateway');
+  const service = credential(backendCredentialFile, 'backend');
+  if (gateway === service) {
+    throw new Error('Gateway and backend credentials must be distinct');
+  }
+  return { publicOrigin, gateway, service };
+}
+
+function gatewayAccepted(request, protection) {
+  const supplied = request.headers['x-lain-gateway'];
+  if (typeof supplied !== 'string') {
+    return false;
+  }
+  const expected = Buffer.from(protection.gateway);
+  const actual = Buffer.from(supplied);
+  return actual.length === expected.length && timingSafeEqual(actual, expected);
+}
+
+function forwardedHeaders(headers, backend, protection) {
+  // Protected transport uses an allowlist: browser identity and proxy metadata
+  // have no meaning to the shared runtime.
+  if (protection) {
+    return { host: backend.host, origin: backend.origin,
+      'content-type': 'application/json', authorization: `Bearer ${protection.service}` };
+  }
   const forwarded = {};
   for (const [name, value] of Object.entries(headers)) {
     if (!hopByHopHeaders.has(name)) {
@@ -63,8 +119,12 @@ function sameOrigin(request) {
   }
 }
 
-function proxyApi(request, response, backend, pending) {
-  if (!sameOrigin(request)) {
+function proxyApi(request, response, backend, pending, protection) {
+  let validOrigin = sameOrigin(request);
+  if (protection) {
+    validOrigin = request.headers.origin === protection.publicOrigin;
+  }
+  if (!validOrigin) {
     sendJson(response, 403, { ok: false, error: 'Cross-origin editor requests are not allowed' });
     return;
   }
@@ -73,18 +133,22 @@ function proxyApi(request, response, backend, pending) {
     transport = https;
   }
   const outgoing = transport.request(new URL('/api', backend), {
-    method: 'POST', headers: forwardedHeaders(request.headers, backend),
+    method: 'POST', headers: forwardedHeaders(request.headers, backend, protection),
   });
   pending.add(outgoing);
   outgoing.once('close', () => pending.delete(outgoing));
-  outgoing.once('error', error => {
-    const code = error.code ?? 'request failed';
-    endWithError(response, 502, new Error(`Backend unavailable (${code})`));
+  outgoing.once('error', () => {
+    endWithError(response, 502, new Error('Backend unavailable (connection failed)'));
   });
   outgoing.once('response', incoming => {
+    if (protection && [401, 403].includes(incoming.statusCode)) {
+      incoming.resume();
+      sendJson(response, 502, { ok: false, error: 'Backend authentication configuration failure' });
+      return;
+    }
     const headers = {};
     for (const [name, value] of Object.entries(incoming.headers)) {
-      if (!hopByHopHeaders.has(name) && !name.startsWith('access-control-')) {
+      if ((!protection || ['content-type', 'content-length'].includes(name)) && !hopByHopHeaders.has(name) && !name.startsWith('access-control-')) {
         headers[name] = value;
       }
     }
@@ -128,8 +192,10 @@ async function serveFile(request, response, file, contentType) {
   }
 }
 
-export function createDevServer({ root = repositoryRoot, backend = 'http://127.0.0.1:4780' } = {}) {
+export function createDevServer({ root = repositoryRoot, backend = 'http://127.0.0.1:4780',
+  mode = 'local', publicOrigin, gatewayCredentialFile, backendCredentialFile } = {}) {
   const address = backendAddress(backend);
+  const protection = protectedConfiguration(mode, publicOrigin, gatewayCredentialFile, backendCredentialFile, address);
   const pending = new Set();
   let closing;
   const assets = new Map([
@@ -139,13 +205,31 @@ export function createDevServer({ root = repositoryRoot, backend = 'http://127.0
     ['/compiled/app.js.map', [join(root, 'target/lain-editor/public/lain-editor/compiled/app.js.map'), 'application/json; charset=utf-8']],
   ]);
   const server = http.createServer((request, response) => {
+    if (protection) {
+      response.setHeader('cache-control', 'no-store');
+    }
+    if (protection && !gatewayAccepted(request, protection)) {
+      sendJson(response, 403, { ok: false, error: 'Authenticated gateway required' });
+      return;
+    }
     const path = request.url.split('?')[0];
+    if (['/auth/session', '/auth/complete'].includes(path) && ['GET', 'HEAD'].includes(request.method)) {
+      response.setHeader('cache-control', 'no-store');
+      if (path === '/auth/session') {
+        sendJson(response, 200, { ok: true, result: { authenticated: true } });
+      } else {
+        response.writeHead(200, { 'content-type': 'text/html; charset=utf-8',
+          'content-security-policy': "default-src 'none'; frame-ancestors 'none'" });
+        response.end('<!doctype html><title>Signed in</title><h1>Signed in</h1><p>Return to the editor tab and select Resume connection.</p>');
+      }
+      return;
+    }
     if (path === '/api') {
       if (request.method !== 'POST') {
         sendJson(response, 405, { ok: false, error: 'Editor API requires POST' }, { allow: 'POST' });
         return;
       }
-      proxyApi(request, response, address, pending);
+      proxyApi(request, response, address, pending, protection);
       return;
     }
     if (!['GET', 'HEAD'].includes(request.method)) {
@@ -211,7 +295,11 @@ if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(resolve(p
   const host = process.env.LAIN_EDITOR_HOST ?? '127.0.0.1';
   const backend = process.env.LAIN_EDITOR_BACKEND ?? 'http://127.0.0.1:4780';
   try {
-    const application = await startDevServer({ port, host, backend });
+    const application = await startDevServer({ port, host, backend,
+      mode: process.env.LAIN_EDITOR_MODE ?? 'local',
+      publicOrigin: process.env.LAIN_EDITOR_PUBLIC_ORIGIN,
+      gatewayCredentialFile: process.env.LAIN_EDITOR_GATEWAY_CREDENTIAL_FILE,
+      backendCredentialFile: process.env.LAIN_EDITOR_BACKEND_CREDENTIAL_FILE });
     console.log(`Lain editor: ${application.url} (backend ${application.backend})`);
     let stopping = false;
     const shutdown = async () => {

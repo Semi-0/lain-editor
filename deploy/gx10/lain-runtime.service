@@ -1,0 +1,27 @@
+[Unit]
+Description=Lain authenticated runtime (backend integration prerequisite)
+After=network.target
+
+[Service]
+User=lain-runtime
+Group=lain-runtime
+WorkingDirectory=/srv/lain/projects
+LoadCredential=backend:/etc/lain-editor/runtime/backend
+Environment=LAIN_RUNTIME_BEARER_CREDENTIAL_FILE=%d/backend
+Environment=LAIN_RUNTIME_HOST=127.0.0.1
+Environment=LAIN_RUNTIME_PORT=4780
+Environment=LAIN_RUNTIME_PROJECT_ROOT=/srv/lain/projects
+# Backend owner must supply this launcher and implement BACKEND-CONTRACT.md.
+# This repository intentionally provides no unauthenticated fallback.
+ExecStart=/usr/local/libexec/lain-runtime-protected
+Restart=on-failure
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/srv/lain/projects
+InaccessiblePaths=/var/lib/lain-authelia /etc/lain-editor/authelia /etc/lain-editor/caddy /etc/lain-editor/editor
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

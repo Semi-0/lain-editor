@@ -95,7 +95,7 @@ try {
   browser = await chromium.launch({ headless: process.env.LAIN_EDITOR_HEADED !== '1' });
   report.browserVersion = browser.version();
   report.nativeFullscreenEscapeSupported = await probeFullscreenEscape(browser);
-  context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+  context = await browser.newContext({ storageState: process.env.LAIN_EDITOR_BROWSER_STORAGE_STATE, viewport: { width: 1440, height: 1000 } });
   page = await context.newPage();
   page.setDefaultTimeout(timeout);
   page.on('pageerror', error => {

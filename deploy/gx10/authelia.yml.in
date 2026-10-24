@@ -1,0 +1,48 @@
+server:
+  address: 'tcp://127.0.0.1:9091/'
+  endpoints:
+    authz:
+      forward-auth:
+        implementation: 'ForwardAuth'
+log:
+  level: 'info'
+authentication_backend:
+  password_reset:
+    disable: true
+  file:
+    path: '/etc/lain-editor/authelia/users.yml'
+    watch: true
+access_control:
+  default_policy: 'deny'
+  rules:
+    - domain: 'editor.lain.home.arpa'
+      subject: 'group:lain-operators'
+      policy: 'two_factor'
+session:
+  name: 'lain_session'
+  same_site: 'lax'
+  inactivity: '30m'
+  expiration: '8h'
+  remember_me: '-1'
+  cookies:
+    - domain: 'lain.home.arpa'
+      authelia_url: 'https://auth.lain.home.arpa'
+      default_redirection_url: 'https://editor.lain.home.arpa/auth/complete'
+webauthn:
+  disable: true
+totp:
+  disable: false
+  issuer: 'Lain LAN'
+storage:
+  local:
+    path: '/var/lib/lain-authelia/db.sqlite3'
+notifier:
+  disable_startup_check: false
+  smtp:
+    address: __SMTP_ADDRESS__
+    sender: __SMTP_SENDER__
+    username: __SMTP_USERNAME__
+    startup_check_address: __SMTP_CHECK_ADDRESS__
+    disable_require_tls: false
+    tls:
+      skip_verify: false

@@ -10,7 +10,7 @@
 (defn initial [document]
   (let [{:keys [domain workspace-ui]} (codec/decode document)]
     {:domain domain
-     :ui {:workspace workspace-ui :workspace-path nil :busy? false :pending-id nil
+     :ui {:workspace workspace-ui :workspace-path nil :busy? false :pending-id nil :connection {:status :connected}
           :panes-ui {} :expansions {} :refreshes {} :tick 0 :workspace-revision 0
           :message "Local runtime · independent blocks"
           :palette {:open? false :target nil :query "" :active 0}}
@@ -33,6 +33,7 @@
            #(codec/update-document %1 desktops/select-pane %2)))
 (defonce busy? (ui-cell :busy?))
 (defonce pending-id (ui-cell :pending-id))
+(defonce connection (ui-cell :connection))
 (defonce generations (remote-cell :generations))
 (defonce session-ids (remote-cell :session-ids))
 (defonce errors (remote-cell :errors))

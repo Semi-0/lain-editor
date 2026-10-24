@@ -1,0 +1,29 @@
+[Unit]
+Description=Lain protected editor proxy
+After=network.target lain-runtime.service
+Requires=lain-runtime.service
+
+[Service]
+User=lain-editor
+Group=lain-editor
+WorkingDirectory=/opt/lain-editor
+Environment=LAIN_EDITOR_MODE=protected
+Environment=LAIN_EDITOR_PUBLIC_ORIGIN=https://editor.lain.home.arpa
+Environment=LAIN_EDITOR_HOST=127.0.0.1
+Environment=LAIN_EDITOR_PORT=4781
+Environment=LAIN_EDITOR_BACKEND=http://127.0.0.1:4780
+LoadCredential=gateway:/etc/lain-editor/editor/gateway
+LoadCredential=backend:/etc/lain-editor/runtime/backend
+Environment=LAIN_EDITOR_GATEWAY_CREDENTIAL_FILE=%d/gateway
+Environment=LAIN_EDITOR_BACKEND_CREDENTIAL_FILE=%d/backend
+ExecStart=/usr/bin/node /opt/lain-editor/scripts/dev.mjs
+Restart=on-failure
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+InaccessiblePaths=/srv/lain/projects /var/lib/lain-authelia /etc/lain-editor/authelia
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
