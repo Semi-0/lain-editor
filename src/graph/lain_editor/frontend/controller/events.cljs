@@ -28,7 +28,7 @@
 
 (defn- current-command [{:keys [action target archive session] :as command}]
   (let [target (or target @s/selected-id)
-        available (if (contains? #{:reopen-selected-session :stop-selected-session} action)
+        available (if (contains? #{:reopen-running :stop-running} action)
                     @s/commands
                     (into (model/commands @s/workspace target @s/generations @s/busy?)
                           (model/desktop-commands @s/workspace @s/busy?)))]

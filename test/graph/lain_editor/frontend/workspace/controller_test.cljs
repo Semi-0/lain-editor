@@ -271,3 +271,30 @@
       (finally
         (aset js/globalThis "confirm" confirm)
         (reset! s/source before)))))
+
+(deftest session-picker-selection-dispatches-current-session-commands
+  (let [before @s/source
+        document (model/initial-workspace)
+        sessions [{:sessionId "retained" :pane "old-pane" :source "(define result 42)"}]
+        calls (atom [])]
+    (try
+      (with-redefs [effects/perform! #(swap! calls conj %)]
+        (doseq [action [:reopen-running :stop-running]
+                interaction [:click :enter]]
+          (reset! s/source (s/initial document))
+          (reset! calls [])
+          (let [commands (model/session-commands sessions action)
+                command (first commands)]
+            (reset! s/palette {:open? true :view :sessions :commands commands
+                               :query "" :active 0})
+            (case interaction
+              :click (do (events/dispatch! [:palette/close])
+                         (events/dispatch! [:workspace/command command]))
+              :enter (events/dispatch! [:palette/key "Enter"]))
+            (is (= [command] @calls) (str action " via " interaction))
+            (is (false? (:open? @s/palette)))
+            (is (thrown? js/Error
+                         (events/dispatch! [:workspace/command
+                                            (assoc command :session "not-listed")])))
+            (is (= [command] @calls) "Unlisted session commands remain rejected"))))
+      (finally (reset! s/source before)))))
