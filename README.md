@@ -30,6 +30,7 @@ Use **⌘K / Ctrl+K** for workspace switching, **Open workspace JSON…**, **Sav
 clojure -M:test
 clojure -M:editor/cljs-test
 node target/lain-editor/tests.js
+node --test scripts/editing.test.mjs
 npm run test:server
 ```
 
@@ -42,6 +43,7 @@ For real browser acceptance, build the app, start both processes, install the de
 - `frontend/ui/reactive`: owned Missionary projections and cancellation. Derived values expose no independent mutation operation.
 - `frontend/view` and feature view functions: pure Hiccup, stable keys, declarative event data.
 - `frontend/controller` and effect adapters: interaction interpretation, requests, measurements, focus, fullscreen, and process ownership.
+- `resources/public/lain-editor/editing.mjs`: textarea matching and completion, using pane generation metadata rendered from the current view-state.
 - `contracts`: portable workspace/layer validation, development protocol, and clearance geometry, consumed by a pinned backend dependency.
 - `build`: portable ClojureScript build provider with explicit caller-owned outputs.
 - `test/deps.edn`: explicit test-source dependency for delegated builds; test namespaces stay owned here.

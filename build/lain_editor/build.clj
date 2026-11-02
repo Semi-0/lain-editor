@@ -31,7 +31,7 @@
       :app
       (do
         (io/make-parents output)
-        (doseq [name ["index.html" "style.css"]]
+        (doseq [name ["index.html" "style.css" "editing.mjs"]]
           (with-open [input (io/input-stream (io/resource (str "public/lain-editor/" name)))]
             (io/copy input (io/file public name))))
         (cljs/build (cljs/inputs (str source) (str contracts))
