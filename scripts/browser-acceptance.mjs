@@ -13,6 +13,10 @@ const requiredChecks = [
   'application loads without page errors',
   'editing retains focus and cursor across derived updates',
   'command palette opens and dismisses',
+  'monochrome workspace uses footer navigation and no outer frames',
+  'matching brackets follow the caret in both directions',
+  'document completion edits the controlled source',
+  'reflective completion uses the current authenticated session',
   'run reaches the real configured runtime',
   'topology renders runtime nodes',
   'layout selects display current settings and refine the chosen budget',
@@ -139,9 +143,42 @@ try {
     const selected = await code.evaluate(element => element.closest('.pane').classList.contains('selected'));
     assert.equal(selected, true);
   });
+  await check('monochrome workspace uses footer navigation and no outer frames', async () => {
+    assert.equal(await page.locator('.workspace-chrome,.desktop-bar').count(), 0);
+    await page.locator('footer .desktop-status').waitFor({ state: 'visible' });
+    const colors = await page.evaluate(() => ({
+      background: getComputedStyle(document.body).backgroundColor,
+      frame: getComputedStyle(document.querySelector('.pane')).borderTopWidth,
+      footer: getComputedStyle(document.querySelector('footer')).borderTopWidth,
+    }));
+    assert.deepEqual(colors, { background: 'rgb(0, 0, 0)', frame: '0px', footer: '0px' });
+    assert.equal(await page.getByText('⌘Enter / Ctrl+Enter to run', { exact: true }).count(), 0);
+  });
+  await check('matching brackets follow the caret in both directions', async () => {
+    await code.evaluate(element => element.setSelectionRange(1, 1));
+    await page.waitForFunction(() => document.querySelectorAll('.lain-matching-bracket[data-matched="true"]').length === 2);
+    assert.deepEqual(await page.locator('.lain-matching-bracket').evaluateAll(marks => marks.map(mark => Number(mark.dataset.position))), [0, 11]);
+    await code.evaluate(element => element.setSelectionRange(element.value.length, element.value.length));
+    await page.waitForFunction(last => document.querySelector('.lain-matching-bracket')?.dataset.position === String(last), source.length - 1);
+    assert.equal(await page.locator('.lain-matching-bracket[data-matched="true"]').count(), 2);
+  });
+  await check('document completion edits the controlled source', async () => {
+    const draft = '(define document-total 9)\n(doc';
+    await code.fill(draft);
+    await code.press('Control+Space');
+    await page.getByRole('option', { name: /^document-total/ }).waitFor({ state: 'visible' });
+    await code.press('Tab');
+    assert.equal(await code.inputValue(), '(define document-total 9)\n(document-total');
+    await page.waitForTimeout(100);
+    assert.equal(await code.inputValue(), '(define document-total 9)\n(document-total');
+    await code.fill(source);
+  });
   await check('command palette opens and dismisses', async () => {
     await page.keyboard.press('Control+k');
     await page.locator('dialog.command-palette').waitFor({ state: 'visible' });
+    for (const label of ['Open workspace JSON…', 'Save workspace', 'Save workspace as…', 'Switch to desktop: 1']) {
+      assert.equal(await page.getByRole('button', { name: label, exact: true }).count(), 1);
+    }
     await page.keyboard.press('Escape');
     await page.locator('dialog.command-palette').waitFor({ state: 'hidden' });
     await code.focus();
@@ -163,6 +200,16 @@ try {
       const value = document.querySelector('.pane.selected .value-view');
       return value !== null && value.textContent.includes('5');
     }, null, { timeout });
+  });
+  await check('reflective completion uses the current authenticated session', async () => {
+    await code.fill(`${source}\n(dis`);
+    await code.press('Control+Space');
+    await page.waitForFunction(() => document.querySelector('.lain-completions-status')?.textContent.startsWith('Session names + document words'));
+    const display = page.getByRole('option', { name: /^display/ }).first();
+    assert.equal(await display.locator('small').textContent(), 'environment');
+    await code.press('Tab');
+    assert.equal(await code.inputValue(), `${source}\n(display`);
+    await code.fill(source);
   });
   const svg = page.locator('.pane.selected .graph-svg').first();
   await check('topology renders runtime nodes', async () => {
@@ -293,12 +340,12 @@ try {
     const originalSource = await code.inputValue();
     const completedLayouts = layoutRequests.length;
     await paletteCommand('New desktop');
-    await page.waitForFunction(() => document.querySelectorAll('.desktop-bar button').length === 2);
+    await page.waitForFunction(() => document.querySelector('.desktop-status')?.getAttribute('aria-label').startsWith('Workspace 2:'));
     report.newDesktopInitialFocus = await page.evaluate(() => document.activeElement?.matches('.pane.selected textarea.code'));
     const newPane = await page.locator('.pane.selected').getAttribute('data-pane-id');
     const newCode = page.locator('.pane.selected textarea.code').first();
     await newCode.fill('(define result 99)');
-    await page.locator('.desktop-bar button').nth(0).click();
+    await paletteCommand('Switch to desktop: 1');
     await page.waitForFunction(id => document.querySelector('.pane.selected')?.dataset.paneId === id, originalPane);
     assert.equal(await page.locator('.pane.selected textarea.code').first().inputValue(), originalSource);
     await page.locator('.pane.selected .graph-node').first().waitFor({ state: 'visible' });
@@ -306,10 +353,10 @@ try {
     assert.equal(layoutRequests.length, completedLayouts, 'Desktop remount must reuse completed layout');
     assert.equal(await page.locator('.pane.selected .graph-svg').getAttribute('data-layout-phase'), 'settled',
       'Desktop remount must not replay the entrance animation');
-    await page.locator('.desktop-bar button').nth(1).click();
+    await paletteCommand('Switch to desktop: 2');
     await page.waitForFunction(id => document.querySelector('.pane.selected')?.dataset.paneId === id, newPane);
     assert.equal(await page.locator('.pane.selected textarea.code').first().inputValue(), '(define result 99)');
-    await page.locator('.desktop-bar button').nth(0).click();
+    await paletteCommand('Switch to desktop: 1');
     await page.waitForFunction(id => document.querySelector('.pane.selected')?.dataset.paneId === id, originalPane);
   });
   await check('split close and archive reopen preserve the draft', async () => {
@@ -451,7 +498,7 @@ try {
     await paletteCommand('Toggle display layers');
   });
   await check('recorded learning replay scrubs and inspects frozen values', async () => {
-    await page.locator('.desktop-bar button').nth(2).click();
+    await paletteCommand('Switch to desktop: 3');
     await page.locator('.pane.selected .replay-view').waitFor({ state: 'visible' });
     const slider = page.getByRole('slider', { name: 'Recorded observation', exact: true });
     await page.waitForFunction(() => {
@@ -508,9 +555,9 @@ try {
     await select.selectOption(alternative.value);
     assert.equal(await select.inputValue(), alternative.value);
     await page.keyboard.press('Escape');
-    await page.locator('.desktop-bar button').nth(0).click();
+    await paletteCommand('Switch to desktop: 1');
     await page.waitForFunction(() => document.querySelector('.pane.selected')?.dataset.paneId === 'amb-search');
-    await page.locator('.desktop-bar button').nth(2).click();
+    await paletteCommand('Switch to desktop: 3');
     await page.waitForFunction(() => document.querySelector('.pane.selected')?.dataset.paneId === 'amb-replay');
     await visualizerSettings();
     const restoredMenu = page.locator('.visualizer-settings .value-fold-menu').first();

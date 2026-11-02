@@ -43,7 +43,7 @@
        (:error entry) (:error entry)
        (:valueGrid output) (grid/view "" (:valueGrid output) {} [id nil])
        output (:value output)
-       :else "⌘Enter / Ctrl+Enter to run")]))
+       :else nil)]))
 
 (defn cell-view [vm id]
   [:pre {:class "cell-view"}

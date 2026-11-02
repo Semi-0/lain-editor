@@ -201,6 +201,7 @@ export function createDevServer({ root = repositoryRoot, backend = 'http://127.0
   const assets = new Map([
     ['/', [join(root, 'resources/public/lain-editor/index.html'), 'text/html; charset=utf-8']],
     ['/style.css', [join(root, 'resources/public/lain-editor/style.css'), 'text/css; charset=utf-8']],
+    ['/editing.mjs', [join(root, 'resources/public/lain-editor/editing.mjs'), 'text/javascript; charset=utf-8']],
     ['/compiled/app.js', [join(root, 'target/lain-editor/public/lain-editor/compiled/app.js'), 'text/javascript; charset=utf-8']],
     ['/compiled/app.js.map', [join(root, 'target/lain-editor/public/lain-editor/compiled/app.js.map'), 'application/json; charset=utf-8']],
   ]);

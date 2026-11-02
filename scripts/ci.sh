@@ -12,6 +12,7 @@ clojure -M:editor/cljs-test
 node target/lain-editor/tests.js
 npm ci --ignore-scripts --no-audit --no-fund
 npm run test:server
+node --test scripts/editing.test.mjs
 npm run test:gateway
 python3 deploy/gx10/render_test.py
 clojure -M:editor/cljs

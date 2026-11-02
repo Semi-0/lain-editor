@@ -16,6 +16,14 @@ The frontend opens at **http://127.0.0.1:4781** and proxies `/api` to the separa
 
 In the backend project, start `clojure -M -m graph.lain-editor.server 4780`. See [running](docs/running.md) and the [user guide](docs/user-guide.md).
 
+## Editing
+
+Place the caret beside `()`, `[]`, or `{}` to highlight its match. Solid outlines indicate a match; dashed outlines indicate a missing or mismatched bracket. Strings, comments, and character literals are excluded.
+
+Press **Ctrl+Space** for document words and names visible in the current running session. Use arrows to select, Enter or Tab to accept, and Escape to dismiss. Completion reads names through the authenticated `/api` boundary with the current pane generation; it never evaluates code or reads binding values. No language server is required.
+
+Use **⌘K / Ctrl+K** for workspace switching, **Open workspace JSON…**, **Save workspace**, and **Save workspace as…**. The active workspace appears in the status bar. Split blocks share one divider; the internal code/visualizer resize handle appears on hover or keyboard focus.
+
 ## Verify
 
 ```sh

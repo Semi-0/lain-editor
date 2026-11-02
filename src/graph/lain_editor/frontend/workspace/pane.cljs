@@ -62,7 +62,7 @@
         graph-size (get pane-ui :graph-size 54)]
     [:section
      {:replicant/key id :class (cond-> ["pane"] (= id (:selected-id vm)) (conj "selected"))
-      :data-pane-id id :tabindex 0 :aria-label (str "Editor " (inc index))
+      :data-pane-id id :data-generation (get (:generations vm) id) :tabindex 0 :aria-label (str "Editor " (inc index))
       :replicant/on-mount [[:dom/pane-mounted id [:event/target]]]
       :replicant/on-render [[:dom/pane-updated id [:event/target]]]
       :replicant/on-unmount [[:dom/pane-unmounted id]]
