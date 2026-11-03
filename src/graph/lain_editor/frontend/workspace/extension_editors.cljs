@@ -17,7 +17,7 @@
                 [:textarea.code
                  {:replicant/key [(:id pane) :extension-code index]
                   :aria-label (str "Extension " (inc index) " code")
-                  :spellcheck false :autocorrect "off" :autocapitalize "off"
+                  :spellcheck "false" :autocorrect "off" :autocapitalize "off"
                   :data-gramm "false" :data-gramm_editor "false"
                   :data-enable-grammarly "false" :data-lt-active "false"
                   :readonly busy? :rows (source-rows source) :value source

@@ -21,7 +21,7 @@
      [:summary {:hidden true} "Extend this running block"]
      [:textarea {:replicant/key [id :extension-draft]
                  :aria-label "Extension code" :placeholder "(define next (+ result 1))"
-                 :spellcheck false :autocorrect "off" :autocapitalize "off"
+                 :spellcheck "false" :autocorrect "off" :autocapitalize "off"
                  :data-gramm "false" :data-gramm_editor "false"
                  :data-enable-grammarly "false" :data-lt-active "false"
                  :readonly (:busy? vm) :value (:extensionDraft pane)
@@ -38,7 +38,7 @@
       [:span (:filename pane)]]
      [:textarea.code
       {:replicant/key [id :source] :aria-label (str "Lain code " (inc index))
-       :spellcheck false :autocorrect "off" :autocapitalize "off"
+       :spellcheck "false" :autocorrect "off" :autocapitalize "off"
        :data-gramm "false" :data-gramm_editor "false"
        :data-enable-grammarly "false" :data-lt-active "false"
        :readonly (:busy? vm) :value (:source pane)
