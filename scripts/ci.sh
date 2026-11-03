@@ -7,6 +7,9 @@ for tool in clojure node npm python3; do
     exit 1
   fi
 done
+clojure -M:format-check
+clojure -M:lint
+clojure -M:quality-test
 clojure -M:test
 clojure -M:editor/cljs-test
 node target/lain-editor/tests.js
