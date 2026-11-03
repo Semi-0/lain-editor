@@ -21,6 +21,9 @@
      [:summary {:hidden true} "Extend this running block"]
      [:textarea {:replicant/key [id :extension-draft]
                  :aria-label "Extension code" :placeholder "(define next (+ result 1))"
+                 :spellcheck false :autocorrect "off" :autocapitalize "off"
+                 :data-gramm "false" :data-gramm_editor "false"
+                 :data-enable-grammarly "false" :data-lt-active "false"
                  :readonly (:busy? vm) :value (:extensionDraft pane)
                  :on {:input [[:workspace/edit-extension-draft id [:event/target.value]]]}}]
      [:button {:type "button" :disabled disabled?
@@ -35,7 +38,10 @@
       [:span (:filename pane)]]
      [:textarea.code
       {:replicant/key [id :source] :aria-label (str "Lain code " (inc index))
-       :spellcheck false :readonly (:busy? vm) :value (:source pane)
+       :spellcheck false :autocorrect "off" :autocapitalize "off"
+       :data-gramm "false" :data-gramm_editor "false"
+       :data-enable-grammarly "false" :data-lt-active "false"
+       :readonly (:busy? vm) :value (:source pane)
        :rows (extension-editors/source-rows (:source pane))
        :on {:input [[:workspace/edit-source id [:event/target.value]]]}}]
      (extension-editors/view pane (:busy? vm) (get-in vm [:applied-extensions (:id pane)])
@@ -82,9 +88,9 @@
          (into [:div (cond-> (composition/stage-properties presented (:measurements pane-ui))
                        (:graph-size pane-ui) (assoc-in [:style :--code-size] (str (- 100 graph-size) "%")))]
                (map-indexed
-               (fn [layer-index layer]
-                 [:div (composition/plane-properties presented layer layer-index)
-                  (layer-view vm pane index layer)])
+                (fn [layer-index layer]
+                  [:div (composition/plane-properties presented layer layer-index)
+                   (layer-view vm pane index layer)])
                 (layers/for-pane presented)))
           resizable?
           (conj [:div.visualizer-divider

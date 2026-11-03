@@ -11,12 +11,15 @@
         (map-indexed
          (fn [index source]
            (let [extension-id (or (:id (nth applied index nil)) index)]
-            (when-not (contains? hidden extension-id)
-             [:div.applied-extension {:replicant/key [(:id pane) :extension extension-id]}
-            [:div.extension-heading (str "Extension " (inc index))]
-            [:textarea.code
-             {:replicant/key [(:id pane) :extension-code index]
-              :aria-label (str "Extension " (inc index) " code")
-              :spellcheck false :readonly busy? :rows (source-rows source) :value source
-              :on {:input [[:workspace/edit-extension (:id pane) index [:event/target.value]]]}}]])))
+             (when-not (contains? hidden extension-id)
+               [:div.applied-extension {:replicant/key [(:id pane) :extension extension-id]}
+                [:div.extension-heading (str "Extension " (inc index))]
+                [:textarea.code
+                 {:replicant/key [(:id pane) :extension-code index]
+                  :aria-label (str "Extension " (inc index) " code")
+                  :spellcheck false :autocorrect "off" :autocapitalize "off"
+                  :data-gramm "false" :data-gramm_editor "false"
+                  :data-enable-grammarly "false" :data-lt-active "false"
+                  :readonly busy? :rows (source-rows source) :value source
+                  :on {:input [[:workspace/edit-extension (:id pane) index [:event/target.value]]]}}]])))
          (model/extension-sources pane))))
