@@ -20,8 +20,8 @@
      (swap! operations assoc id save!)
      (swap! s/ui assoc :save-dialog
             (merge {:id id :path path :replace? false :saving? false :error nil
-                    :aria-label "Save block to file" :title "Save block to file"
-                    :description "Includes current code, edited extensions and the pending extension draft."}
+                    :aria-label "Save file" :title "Save file"
+                    :description "Save inside the server workspace. Includes current code, edited extensions and the pending draft."}
                    options))
      id)))
 

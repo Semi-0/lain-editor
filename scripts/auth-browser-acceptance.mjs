@@ -61,7 +61,7 @@ try {
     assert.equal(polls, pausedPolls, 'Polling pauses after expiry');
     await editor.fill('(define draft 456)');
     const downloadReady = page.waitForEvent('download');
-    await page.getByRole('button', { name: 'Export workspace', exact: true }).click();
+    await page.getByRole('button', { name: 'Download workspace', exact: true }).click();
     const download = await downloadReady;
     const stream = await download.createReadStream();
     let body = '';

@@ -8,6 +8,7 @@
             [graph.lain-editor.frontend.ui.reactive :as rx]
             [graph.lain-editor.frontend.view.workspace :as workspace-view]
             [graph.lain-editor.frontend.view.save-dialog :as save-view]
+            [graph.lain-editor.frontend.view.file-browser :as file-browser]
             [graph.lain-editor.frontend.workspace.source-save :as source-save]
             [graph.lain-editor.frontend.workspace.desktops :as desktops]
             [graph.lain-editor.frontend.workspace.state :as s]
@@ -37,6 +38,7 @@
              :file/load (events/dispatch! event native)
              (cond
                (= "dom" (namespace action)) (browser/dispatch! event)
+               (= "server-files" (namespace action)) (effects/server-files-event! event)
                (= "save-dialog" (namespace action))
                (do (when (and native (= action :save-dialog/submit)) (.preventDefault native))
                    (source-save/dispatch! event))
@@ -63,6 +65,7 @@
     (r/render root
               (conj (workspace-view/view view-state)
                     (save-view/view (get-in view-state [:ui :save-dialog]))
+                    (file-browser/view (get-in view-state [:ui :file-browser]))
                     (connection-view/view (:connection view-state))))
     (when (and selection (identical? active (.-activeElement js/document))
                (.-isConnected active))

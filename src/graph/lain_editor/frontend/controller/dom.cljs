@@ -175,14 +175,15 @@
   (rx/own! owner #(doseq [id (keys @pane-scopes)] (pane-unmounted! id)))
   (dom/listen! owner js/document "keydown"
                (fn [event]
-                 (let [modifier? (or (.-metaKey event) (.-ctrlKey event)) key (.-key event)]
+                 (let [modifier? (or (.-metaKey event) (.-ctrlKey event)) key (.-key event)
+                       modal? (some? (.querySelector js/document "dialog[open]"))]
                    (cond
                      (and modifier? (= "k" (.toLowerCase key)))
                      (do (.preventDefault event)
                          (events/dispatch! [:palette/open @s/selected-id]))
-                     (and modifier? (= "Enter" key) (not (:open? @s/palette)))
+                     (and modifier? (= "Enter" key) (not modal?) (not (:open? @s/palette)))
                      (do (.preventDefault event) (effects/run! @s/selected-id "run"))
-                     (and modifier? (= "s" (.toLowerCase key)) (not (:open? @s/palette)))
+                     (and modifier? (= "s" (.toLowerCase key)) (not modal?) (not (:open? @s/palette)))
                      (do (.preventDefault event) (effects/save-block! @s/selected-id))
                      (= "Escape" key)
                      (doseq [menu (array-seq (.querySelectorAll js/document ".options[open]"))]

@@ -125,17 +125,7 @@
                          (s/refresh! a))))
      :layer/binding-key (when (= "Enter" b) (dispatch! [:layer/binding a c]))
      :file/load (effects/load-file! a (file-at b))
-     :file/restore
-     (when-let [file (file-at a)]
-       (let [token (str (random-uuid)) epoch (effects/lifecycle-token)
-             current? #(and (= token @restore-token) (effects/current-lifecycle? epoch))]
-         (reset! restore-token token)
-         (-> (.text file)
-             (.then (fn [text]
-                      (when (current?)
-                        (effects/restore! (js->clj (js/JSON.parse text) :keywordize-keys true)
-                                          {:workspace-path nil}))))
-             (.catch (fn [error] (when (current?) (reset! s/message (.-message error))))))))
+     :file/restore (effects/upload-to-server! "workspace" (file-at a))
      (:development/enable :development/commit :development/disable)
      (development-event! kind a)
      (if-let [handler (get @handlers (namespace kind))]

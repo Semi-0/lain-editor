@@ -1,7 +1,8 @@
 (ns graph.lain-editor.frontend.workspace.effects
   "HTTP, source commits, workspace replay, and browser file effects."
   (:refer-clojure :exclude [run!])
-  (:require [graph.lain-editor.frontend.ui.dom :as dom]
+  (:require [clojure.string :as str]
+            [graph.lain-editor.frontend.ui.dom :as dom]
             [graph.lain-editor.frontend.workspace.desktops :as desktops]
             [graph.lain-editor.frontend.workspace.model :as model]
             [graph.lain-editor.frontend.workspace.source-save :as source-save]
@@ -37,8 +38,10 @@
   (doseq [controller (vals (:controllers @transport))]
     (when controller (.abort controller)))
   (swap! transport #(-> % (update :epoch inc) (assoc :controllers {})))
+  (source-save/close!)
   (reset! operation-token nil)
   (reset! file-loads {})
+  (swap! s/ui dissoc :file-browser)
   (s/transact! #(do (reset! s/busy? false) (reset! s/pending-id nil))))
 
 (defn- current-result? [epoch pane generation]
@@ -329,23 +332,10 @@
       (reset! s/message "Closed block reopened · not run")
       (dom/focus-pane! fresh-id))))
 
-(defn load-file! [id file]
-  (when file
-    (let [token (str (random-uuid)) epoch (lifecycle-token)
-          original-source (:source (model/pane @s/workspace id))
-          current? #(and (current-lifecycle? epoch) (= token (get @file-loads id))
-                         (some? (model/pane @s/workspace id))
-                         (= original-source (:source (model/pane @s/workspace id))))]
-      (swap! file-loads assoc id token)
-      (-> (.text file)
-          (.then (fn [source]
-                   (when (current?)
-                     (s/transact! #(do
-                                     (s/change-pane! id model/loaded-source (.-name file) source)
-                                     (reset! s/message "File loaded · ⌘Enter / Ctrl+Enter runs the selected block"))))))
-          (.catch (fn [error] (when (current?) (reset! s/message (.-message error)))))
-          (.finally (fn []
-                      (when (= token (get @file-loads id)) (swap! file-loads dissoc id))))))))
+(declare upload-to-server!)
+
+(defn load-file! [_id file]
+  (upload-to-server! "source" file))
 
 (defn- save-workspace-to! [path replace?]
   (-> (api! {:op "save-workspace" :path path :replace replace? :workspace @s/workspace})
@@ -362,22 +352,29 @@
      js/document
      {:aria-label "Save workspace as"
       :title "Save workspace as"
-      :description "Choose a project-relative JSON path. This becomes the target for Save workspace."})))
+      :description "Save inside the server workspace. This becomes the target for Save workspace."})))
 
 (defn save-workspace! []
   (if-let [path @s/workspace-path]
     (operation! nil #(save-workspace-to! path true))
     (save-workspace-as!)))
 
-(defn export-workspace! []
-  (let [blob (js/Blob. #js [(js/JSON.stringify (clj->js @s/workspace) nil 2)]
-                       #js {:type "application/json"})
+(defn- download! [filename content mime]
+  (let [blob (js/Blob. #js [content] #js {:type mime})
         url (.createObjectURL js/URL blob)
         link (.createElement js/document "a")]
     (set! (.-href link) url)
-    (set! (.-download link) "lain-workspace.json")
+    (set! (.-download link) filename)
     (.click link)
     (js/setTimeout #(.revokeObjectURL js/URL url) 1000)))
+
+(defn export-workspace! []
+  (download! (last (str/split (or @s/workspace-path "lain-workspace.json") #"[/\\]"))
+             (js/JSON.stringify (clj->js @s/workspace) nil 2) "application/json"))
+
+(defn download-file! [id]
+  (let [pane (model/pane @s/workspace id)]
+    (download! (model/block-filename pane) (model/block-source pane) "text/plain;charset=utf-8")))
 
 (defn persist! [document]
   (try
@@ -407,13 +404,112 @@
 (defn save-block! [id]
   (when-not @s/busy?
     (source-save/open!
-     (str "examples/lain/saved/" (model/block-filename (model/pane @s/workspace id)))
+     (let [pane (model/pane @s/workspace id)]
+       (if (str/ends-with? (:filename pane) ".lain") (:filename pane) (model/block-filename pane)))
      (fn [path replace?]
        (let [pane (model/pane @s/workspace id)]
          (-> (api! {:op "save-block" :pane id :path path :replace replace? :source (model/block-source pane)})
              (.then (fn [result]
-                      (reset! s/message (str "Block saved to " (:path result)))
+                      (s/change-pane! id assoc :filename (:path result))
+                      (reset! s/message (str "File saved in server workspace: " (:path result)))
                       result))))))))
+
+(defn close-server-browser! []
+  (swap! s/ui dissoc :file-browser))
+
+(defn- browser-current? [id epoch]
+  (and (current-lifecycle? epoch) (= id (get-in @s/ui [:file-browser :id]))))
+
+(defn browse-server! [path]
+  (let [{:keys [id kind]} (:file-browser @s/ui) epoch (lifecycle-token) request-id (str (random-uuid))
+        current? #(and (browser-current? id epoch) (= request-id (get-in @s/ui [:file-browser :request-id])))]
+    (when id
+      (swap! s/ui update :file-browser assoc :loading? true :error nil :request-id request-id)
+      (-> (api! {:op "browse-files" :kind kind :path path})
+          (.then (fn [result]
+                   (when (current?)
+                     (swap! s/ui update :file-browser merge result {:loading? false :directory (:path result) :query ""}))))
+          (.catch (fn [error]
+                    (when (and (current?) (not (cancelled? error)))
+                      (swap! s/ui update :file-browser assoc :loading? false :error (.-message error)))))))))
+
+(defn open-server-browser! [kind]
+  (when (connected?)
+    (swap! s/ui assoc :file-browser {:id (str (random-uuid)) :kind kind :path "" :directory ""
+                                    :query "" :entries [] :loading? true})
+    (browse-server! "")))
+
+(defn- open-source-document! [{:keys [path source]}]
+  (when (>= (count (:panes @s/workspace)) 64) (throw (js/Error. "Workspace has 64 panes")))
+  (let [id (str (random-uuid))
+        pane (model/loaded-source (model/new-pane id) path source)]
+    (s/transact! #(do (swap! s/workspace model/spawn-pane pane)
+                     (s/select-pane! id)
+                     (reset! s/message (str "Opened " path " from server workspace · not run"))))
+    (dom/focus-pane! id)))
+
+(defn open-server-path! [path]
+  (let [{:keys [id kind]} (:file-browser @s/ui) epoch (lifecycle-token)]
+    (swap! s/ui update :file-browser assoc :loading? true :error nil)
+    (-> (api! {:op (if (= kind "workspace") "open-workspace" "open-file") :path path})
+        (.then (fn [result]
+                 (when (browser-current? id epoch)
+                   (if (= kind "workspace")
+                     (-> (restore! (:workspace result) {:workspace-path (:path result)})
+                         (.then (fn [_] (close-server-browser!))))
+                     (do (close-server-browser!) (open-source-document! result))))))
+        (.catch (fn [error]
+                  (when (and (browser-current? id epoch) (not (cancelled? error)))
+                    (swap! s/ui update :file-browser assoc :loading? false :error (.-message error))))))))
+
+(defn upload-to-server! [kind file]
+  (when file
+    (let [epoch (lifecycle-token)
+          browser (:file-browser @s/ui)
+          token (str (random-uuid))
+          directory (or (:path browser) "")
+          basename (last (str/split (.-name file) #"[/\\]"))
+          filename (str (str/replace basename #"\.[^.]+$" "") (if (= kind "workspace") ".json" ".lain"))
+          path (str (when-not (str/blank? directory) (str directory "/")) filename)
+          current? #(and (current-lifecycle? epoch) (= token (:upload @file-loads))
+                         (or (nil? browser) (= (:id browser) (get-in @s/ui [:file-browser :id]))))]
+      (swap! file-loads assoc :upload token)
+      (if (> (.-size file) (* (if (= kind "workspace") 16 1) 1024 1024))
+        (reset! s/message "File exceeds the editor size limit")
+        (-> (.text file)
+            (.then
+             (fn [text]
+               (when (current?)
+                 (let [document (when (= kind "workspace")
+                                  (workspace/upgrade (js->clj (js/JSON.parse text) :keywordize-keys true)))
+                       save! (fn [destination replace?]
+                               (-> (api! (if document
+                                           {:op "save-workspace" :path destination :replace replace? :workspace document}
+                                           {:op "save-block" :path destination :replace replace? :source text}))
+                                   (.then (fn [saved]
+                                            (if document
+                                              (restore! document {:workspace-path (:path saved)})
+                                              (open-source-document! {:path (:path saved) :source text}))))))]
+                   (close-server-browser!)
+                   (source-save/open! path save! nil
+                                      {:aria-label "Save uploaded file" :title "Save uploaded file to server workspace"
+                                       :description "Save a server copy before opening. Existing files require explicit replacement."})))))
+            (.catch (fn [error]
+                      (when (current?)
+                        (if (:file-browser @s/ui)
+                          (swap! s/ui assoc-in [:file-browser :error] (.-message error))
+                          (reset! s/message (.-message error)))))))))))
+
+(defn server-files-event! [[action a b]]
+  (case action
+    :server-files/close (close-server-browser!)
+    :server-files/directory (swap! s/ui assoc-in [:file-browser :directory] a)
+    :server-files/query (swap! s/ui assoc-in [:file-browser :query] a)
+    :server-files/browse (browse-server! (or a (get-in @s/ui [:file-browser :directory])))
+    :server-files/choose (if (= b "directory") (browse-server! a) (open-server-path! a))
+    :server-files/upload (upload-to-server! (get-in @s/ui [:file-browser :kind]) (when a (.item a 0)))
+    :server-files/upload-picker (.click (.getElementById js/document "server-file-upload"))
+    (throw (ex-info "Unknown server file action" {:action action}))))
 
 (defn- toggle-panel! [id panel focus-selector]
   (swap! s/ui update-in [:panes-ui id :panels panel] not)
@@ -458,7 +554,9 @@
       :close-extension-editor (swap! s/ui update-in [:panes-ui target :hidden-extension-editors] (fnil conj #{}) extensionId)
       :reopen-extension-editor (swap! s/ui update-in [:panes-ui target :hidden-extension-editors] disj extensionId)
       :remove-extension (remove-extension! target extensionId)
-      :load (.click (.querySelector (dom/pane-root target) "input[type=file]"))
+      :load (open-server-browser! "source")
+      :download-file (download-file! target)
+      :download-workspace (export-workspace!)
       :save-block (save-block! target)
       :split-row (add-pane! target "row")
       :split-column (add-pane! target "column")
@@ -488,5 +586,5 @@
       :development-settings (toggle-panel! target :development nil)
       :save (save-workspace!)
       :save-as (save-workspace-as!)
-      :open (.click (.getElementById js/document "open"))
+      :open (open-server-browser! "workspace")
       (throw (js/Error. "Unknown palette command")))))

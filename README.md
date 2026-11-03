@@ -22,7 +22,7 @@ Place the caret beside `()`, `[]`, or `{}` to highlight its match. Solid outline
 
 Press **Ctrl+Space** for document words and names visible in the current running session. Use arrows to select, Enter or Tab to accept, and Escape to dismiss. Completion reads names through the authenticated `/api` boundary with the current pane generation; it never evaluates code or reads binding values. No language server is required.
 
-Use **⌘K / Ctrl+K** for workspace switching, **Open workspace JSON…**, **Save workspace**, and **Save workspace as…**. The active workspace appears in the status bar. Split blocks share one divider; the internal code/visualizer resize handle appears on hover or keyboard focus.
+Use **⌘K / Ctrl+K** for workspace switching, **Open file…**, **Open workspace…**, **Save workspace**, and **Save workspace as…**. Open actions browse the restricted server workspace; uploads save a server copy first. **Download file / Download workspace** save local copies. The active workspace appears in the status bar. Split blocks share one divider; the internal code/visualizer resize handle appears on hover or keyboard focus.
 
 ## Verify
 

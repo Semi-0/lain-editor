@@ -9,9 +9,9 @@
       :on {:cancel [[:event/prevent-default] [:save-dialog/cancel]]}}
      [:form {:on {:submit [[:event/prevent-default] [:save-dialog/submit]]}}
       [:h2 title]
-      [:label "Project-relative file path"
+      [:label "Workspace-relative file path"
        [:input {:type "text" :required true :value path :disabled saving?
-                :aria-label "Project-relative file path"
+                :aria-label "Workspace-relative file path"
                 :on {:input [[:save-dialog/path [:event/target.value]]]}}]]
       [:p description]
       [:label.replace-file

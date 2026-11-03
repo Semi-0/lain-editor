@@ -224,9 +224,9 @@
     (is (= "(define x 1)\n" (model/block-source (assoc (model/new-pane "b") :source "(define x 1)\n"))))
     (is (= "" (model/block-source (model/new-pane "b"))))
     (is (= "a" (:target (first (model/matching-commands (model/commands (document) "a" {} false)
-                                                       "save block")))))
+                                                       "save file")))))
     (is (:enabled (first (model/matching-commands (model/commands (document) "a" {} false)
-                                                 "save block"))))))
+                                                 "save file"))))))
 
 (deftest manual-refresh-is-a-portable-per-block-preference
   (let [doc (document)

@@ -12,17 +12,18 @@ Application files and examples mentioned below live in the configured backend pr
   errors from the base source, edited applied extensions, or a new extension are
   shown in the bottom status bar for the selected block. Another block's success
   or a save message does not hide that error; a successful run of the failed block
-  clears it. Hover the status text to read the complete error. **Load Lain file…**
-  in the palette reads a local file into that editor before execution.
-- **Save block to file…** in the palette, or **Cmd/Ctrl+S**, saves the selected
-  block as a project-local `.lain` file. Choose a path relative to the repository
-  root; the suggested folder is `examples/lain/saved/`. Missing directories are
-  created. Existing files require selecting **Replace existing file**. The saved
-  text includes current source, edited applied extensions and the pending
-  extension draft in order, including code that has not been run. Saving does
-  not run code or replace the current session. The success message gives the
-  path, so another tool or agent can read that specific block directly from the
-  project. Files outside the project and paths through symbolic links are rejected.
+  clears it. Hover the status text to read the complete error.
+- **Open file…** browses `.lain`, `.clj` and `.txt` files in the restricted server
+  workspace, starting at its root. Opening creates a new draft block and does not
+  run code. Use Directory, Up, and Filter files to navigate. **Upload file…** is
+  optional: it saves a server copy before opening it.
+- **Save file…**, or **Cmd/Ctrl+S**, saves current source, edited applied extensions
+  and the pending extension draft as a `.lain` file in the server workspace.
+  Paths are workspace-relative; missing directories are created. Existing files
+  require **Replace existing file**. Saving does not run code. Paths outside the
+  workspace and paths through symbolic links are rejected.
+- **Download file** and **Download workspace** create local browser downloads.
+  They also work while the remote connection is paused.
 - **Split side by side / Split stacked** subdivide the selected tile with a new
   independent empty block. **Spawn new block** adds an empty block beside the
   entire layout. **Close block** closes the selection; the final block is kept.
@@ -63,14 +64,14 @@ Application files and examples mentioned below live in the configured backend pr
   scroll to zoom. **Compact topology** is available in the command palette. Select a node for actual runtime metadata. Select
   a call and **Open this call body** to inspect that occurrence. **Return to root topology** in the palette returns to
   the display cell's trace. Display panels refresh every two seconds while visible.
-- **Save workspace / Save workspace as… / Open workspace JSON…**, inside the workspace **…** menu, round-trip all desktop split trees and ratios, pane titles,
-  file names, drafts, display targets/modes, last executed source, and ordered
-  successful extensions. Import validates and prepares all programs before
-  replacing the current sessions. **Save workspace as…** chooses a project-relative
-  `.json` target and makes it current; later **Save workspace** overwrites that target.
-  A browser-imported file does not reveal its original path, so its first save opens
-  **Save workspace as…** rather than guessing. Drafts are separate from executed source.
-  Browser local storage keeps both the recovery document and its established project path.
+- **Open workspace…** browses server workspace `.json` files. It restores layouts,
+  titles, drafts, display settings and ordered extensions without executing them;
+  use Run explicitly. **Upload workspace…** saves a server copy before opening.
+  **Save workspace as…** chooses a workspace-relative `.json` path and makes it
+  current; later **Save workspace** saves to that path. Existing targets require
+  explicit replacement when choosing a path. Browser recovery storage preserves
+  drafts and the current server path across refreshes. Runtime reconnect references
+  stay separate from portable workspace documents.
 
 JSON is a **source replay document**, not a serialized JVM or heap snapshot.
 Clock timestamps, external effects, and transient runtime inputs are not frozen.

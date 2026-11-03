@@ -248,7 +248,8 @@
                (when (= false (:autoRefresh p)) " · manual refresh"))))
 
 (def command-specs
-  [[:run "Run block"] [:load "Load Lain file…"] [:save-block "Save block to file…"]
+  [[:run "Run block"] [:load "Open file…"] [:save-block "Save file…"]
+   [:download-file "Download file"] [:download-workspace "Download workspace"]
    [:split-row "Split side by side"] [:split-column "Split stacked"]
    [:spawn "Spawn new block"] [:spawn-slot "Spawn slot"] [:close "Close block"]
    [:detach-session "Detach running session"]
@@ -264,7 +265,7 @@
    [:refresh "Refresh output"] [:toggle-auto-refresh "Pause automatic refresh"] [:edit-extension "Toggle extension editor"] [:extend "Apply extension"]
    [:development-settings "Toggle incremental development"]
    [:new-workspace "New workspace"] [:save "Save workspace"]
-   [:save-as "Save workspace as…"] [:open "Open workspace JSON…"]])
+   [:save-as "Save workspace as…"] [:open "Open workspace…"]])
 
 (defn extension-commands [pane-id applied generations busy?]
   (vec (mapcat (fn [[index {:keys [id source]}]]
@@ -288,6 +289,7 @@
                                       "Resume automatic refresh" label) :target id
               :enabled (and (not busy?) (some? p)
                             (case action
+                              :load (< (count (:panes document)) 64)
                               :detach-session (and (contains? generations id)
                                                    (some? (:executedSource p)))
                               :reopen-session (< (count (:panes document)) 64)

@@ -36,6 +36,7 @@ const requiredChecks = [
   'persisted stack composition selects the matching option',
   'recorded learning replay scrubs and inspects frozen values',
   'fold cell selection survives a desktop remount',
+  'server workspace opens drafts and downloads local copies',
   'no browser errors were reported',
 ];
 const report = { url, startedAt: new Date().toISOString(), requiredChecks, checks: [], pageErrors: [], consoleErrors: [], passed: false };
@@ -190,7 +191,7 @@ try {
   await check('command palette opens and dismisses', async () => {
     await page.keyboard.press('Control+k');
     await page.locator('dialog.command-palette').waitFor({ state: 'visible' });
-    for (const label of ['Open workspace JSON…', 'Save workspace', 'Save workspace as…', 'Switch to desktop: 1']) {
+    for (const label of ['Open workspace…', 'Save workspace', 'Save workspace as…', 'Switch to desktop: 1']) {
       assert.equal(await page.getByRole('button', { name: label, exact: true }).count(), 1);
     }
     await page.keyboard.press('Escape');
@@ -398,10 +399,10 @@ try {
       }
     };
     page.on('request', observe);
-    await paletteCommand('Save block to file…');
-    const dialog = page.getByRole('dialog', { name: 'Save block to file', exact: true });
+    await paletteCommand('Save file…');
+    const dialog = page.getByRole('dialog', { name: 'Save file', exact: true });
     await dialog.waitFor({ state: 'visible' });
-    await dialog.getByRole('textbox', { name: 'Project-relative file path' }).fill('should-not-be-written.lain');
+    await dialog.getByRole('textbox', { name: 'Workspace-relative file path' }).fill('should-not-be-written.lain');
     await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
     await dialog.waitFor({ state: 'hidden' });
     page.off('request', observe);
@@ -489,6 +490,12 @@ try {
       return incoming.request().postDataJSON().op === 'restore';
     });
     await page.locator('#open').setInputFiles({ name: 'example-workspace.json', mimeType: 'application/json', buffer: bytes });
+    const uploadDialog = page.getByRole('dialog', { name: 'Save uploaded file', exact: true });
+    await uploadDialog.waitFor({ state: 'visible' });
+    await uploadDialog.getByRole('textbox', { name: 'Workspace-relative file path' }).fill('browser-acceptance/example-workspace.json');
+    await uploadDialog.getByRole('checkbox').check();
+    await uploadDialog.getByRole('button', { name: 'Save file', exact: true }).click();
+    await uploadDialog.waitFor({ state: 'hidden' });
     const result = await response;
     assert.equal(result.ok(), true);
     const body = await result.json();
@@ -538,6 +545,12 @@ try {
       return incoming.request().postDataJSON().op === 'restore';
     });
     await page.locator('#open').setInputFiles({ name: 'amb-workspace.json', mimeType: 'application/json', buffer: bytes });
+    const uploadDialog = page.getByRole('dialog', { name: 'Save uploaded file', exact: true });
+    await uploadDialog.waitFor({ state: 'visible' });
+    await uploadDialog.getByRole('textbox', { name: 'Workspace-relative file path' }).fill('browser-acceptance/amb-workspace.json');
+    await uploadDialog.getByRole('checkbox').check();
+    await uploadDialog.getByRole('button', { name: 'Save file', exact: true }).click();
+    await uploadDialog.waitFor({ state: 'hidden' });
     const result = await response;
     assert.equal(result.ok(), true);
     const body = await result.json();
@@ -639,6 +652,44 @@ try {
     report.selects.restoredFoldCell = alternative.value;
     await restoredMenu.locator(':scope > summary').click();
     await page.keyboard.press('Escape');
+  });
+  await check('server workspace opens drafts and downloads local copies', async () => {
+    const api = async command => {
+      const response = await context.request.post(new URL('/api', url).href, { headers: { Origin: new URL(url).origin }, data: command });
+      const body = await response.json(); assert.equal(body.ok, true, body.error); return body.result;
+    };
+    const prefix = `browser-acceptance/files-${Date.now()}`;
+    const text = '; server draft, deliberately incomplete\n(define';
+    await api({ op: 'save-block', path: `${prefix}/draft.lain`, source: text });
+    const document = await page.evaluate(() => JSON.parse(localStorage.getItem('lain-tiled-editor-v1')));
+    await api({ op: 'save-workspace', path: `${prefix}/layout.json`, workspace: document });
+    const before = await api({ op: 'list-sessions' });
+    const priorSources = await page.locator('textarea.code').evaluateAll(nodes => nodes.map(node => node.value));
+    await paletteCommand('Open file…');
+    const picker = page.getByRole('dialog', { name: 'Open file', exact: true });
+    await picker.getByRole('textbox', { name: 'Server workspace directory' }).fill(prefix);
+    await picker.getByRole('button', { name: 'Go', exact: true }).click();
+    await picker.getByRole('button', { name: 'Open draft.lain', exact: true }).click();
+    await picker.waitFor({ state: 'hidden' });
+    assert.equal(await page.locator('.pane.selected textarea.code').inputValue(), text);
+    for (const source of priorSources) assert.ok((await page.locator('textarea.code').evaluateAll(nodes => nodes.map(node => node.value))).includes(source));
+    const downloadPromise = page.waitForEvent('download');
+    await paletteCommand('Download file');
+    const download = await downloadPromise;
+    assert.equal(download.suggestedFilename(), 'draft.lain');
+    assert.equal(await readFile(await download.path(), 'utf8'), text + '\n');
+    await paletteCommand('Open workspace…');
+    const workspacePicker = page.getByRole('dialog', { name: 'Open workspace', exact: true });
+    await workspacePicker.getByRole('textbox', { name: 'Server workspace directory' }).fill(prefix);
+    await workspacePicker.getByRole('button', { name: 'Go', exact: true }).click();
+    await workspacePicker.getByRole('button', { name: 'Open layout.json', exact: true }).click();
+    await workspacePicker.waitFor({ state: 'hidden' });
+    const workspaceDownload = page.waitForEvent('download');
+    await paletteCommand('Download workspace');
+    const exported = await workspaceDownload;
+    assert.equal(exported.suggestedFilename(), 'layout.json');
+    assert.equal(JSON.parse(await readFile(await exported.path(), 'utf8')).format, 'lain-tiled-editor');
+    assert.deepEqual(await api({ op: 'list-sessions' }), before);
   });
   await check('no browser errors were reported', async () => {
     assert.deepEqual(report.pageErrors, []);

@@ -363,3 +363,9 @@ svg .node-frame, svg .source-reference rect { rx: 0; ry: 0; }
 .lain-completions [aria-selected=true] { background: var(--foreground); color: var(--background); }
 .lain-completions small { opacity: .75; }
 .lain-completions-status { padding: 4px 8px; white-space: normal; }
+
+.file-browser-location { display: flex; gap: 8px; align-items: end; margin-bottom: 12px; }
+.file-browser-location label { flex: 1; }
+.server-file-browser input[type=search] { width: 100%; box-sizing: border-box; margin-bottom: 12px; }
+.server-file-list { display: flex; flex-direction: column; gap: 4px; max-height: 45vh; min-height: 100px; overflow: auto; }
+.server-file-list button { text-align: left; padding: 8px; }
