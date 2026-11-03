@@ -245,7 +245,7 @@
                    (reset! reply {:ok true :result {:stopped "other"}})
                    (effects/stop-session! "other")))
           (.then (fn [_]
-                   (is (= "Detached session stopped" @s/message))
+                   (is (= "Session stopped" @s/message))
                    (is (= ["list-sessions" "list-sessions" "reopen-session" "reopen-session"
                            "stop-session" "stop-session"] (mapv :op @calls)))
                    (is (= "live" (:sessionId (nth @calls 3))))))
@@ -298,3 +298,47 @@
                                             (assoc command :session "not-listed")])))
             (is (= [command] @calls) "Unlisted session commands remain rejected"))))
       (finally (reset! s/source before)))))
+
+(deftest extension-palette-dispatch-validates-the-selected-stable-id
+  (let [before @s/source
+        initial (model/initial-workspace)
+        id (:id (first (:panes initial)))
+        document (model/update-pane initial id assoc :extensions ["first" "second"])]
+    (try
+      (reset! s/source (s/initial document))
+      (reset! s/generations {id "generation"})
+      (reset! s/session-ids {id "owner"})
+      (reset! s/applied-extensions {id [{:id "one" :source "first"} {:id "two" :source "second"}]})
+      (let [saved @s/workspace]
+        (events/dispatch! [:workspace/command {:action :close-extension-editor :target id :extensionId "two"}])
+        (is (= #{"two"} (get-in @s/ui [:panes-ui id :hidden-extension-editors])))
+        (is (= saved @s/workspace))
+        (is (= {id "generation"} @s/generations))
+        (is (= {id "owner"} @s/session-ids))
+        (events/dispatch! [:workspace/command {:action :reopen-extension-editor :target id :extensionId "two"}])
+        (is (= #{} (get-in @s/ui [:panes-ui id :hidden-extension-editors])))
+        (is (thrown? js/Error (events/dispatch! [:workspace/command {:action :close-extension-editor :target id :extensionId "unknown"}])))
+        (is (= saved @s/workspace)))
+      (finally (reset! s/source before)))))
+
+(deftest empty-reconciliation-persists-removal-of-missing-owner-references
+  (async done
+    (let [before @s/source original-fetch (.-fetch js/globalThis)
+          original-storage (.-localStorage js/globalThis)
+          stored (atom {effects/reconnect-storage-key "{\"old\":{\"sessionId\":\"missing\"}}"})
+          document (model/initial-workspace)]
+      (reset! s/source (s/initial document))
+      (set! (.-localStorage js/globalThis) #js {:setItem (fn [key value] (swap! stored assoc key value))})
+      (set! (.-fetch js/globalThis)
+            (fn [& _] (js/Promise.resolve #js {:json (fn [] (js/Promise.resolve #js {:ok true :result #js {:sessions #js {} :generations #js {} :displayModes #js {}}}))})))
+      (-> (effects/restore! document {:reconnect {"old" {:sessionId "missing"}}})
+          (.then (fn [_]
+                   (is (= {} @s/reconnect))
+                   (is (= {} (js->clj (js/JSON.parse (get @stored effects/reconnect-storage-key)))))
+                   (is (= {} @s/generations))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally (fn []
+                      (set! (.-fetch js/globalThis) original-fetch)
+                      (set! (.-localStorage js/globalThis) original-storage)
+                      (reset! s/source before)
+                      (done)))))))

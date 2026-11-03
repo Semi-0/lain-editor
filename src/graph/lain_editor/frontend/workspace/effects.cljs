@@ -10,6 +10,8 @@
             [graph.lain-editor.workspace.layers :as layers]))
 
 (def storage-key "lain-tiled-editor-v1")
+(def reconnect-storage-key "lain-tiled-editor-reconnect-v1")
+
 (def workspace-path-storage-key "lain-tiled-editor-workspace-path-v1")
 
 (defonce transport (atom {:epoch 0 :controllers {}}))
@@ -129,7 +131,33 @@
                         (reset! operation-token nil)
                         (s/transact! #(do (reset! s/busy? false) (reset! s/pending-id nil))))))))))
 
-(defn run! [id op]
+(defn- remember-owner! [id result]
+  (swap! s/generations assoc id (:generation result))
+  (swap! s/session-ids assoc id (:sessionId result))
+  (swap! s/run-ids assoc id (:runId result))
+  (swap! s/applied-extensions assoc id (:appliedExtensions result))
+  (swap! s/reconnect assoc id (assoc (model/reconnect-entry result) :appliedExtensions (:appliedExtensions result))))
+
+(defn- reconcile-before! [id]
+  (if-let [session-id (get @s/session-ids id)]
+    (let [generation (get @s/generations id)]
+      (-> (api! {:op "session-status" :sessionId session-id})
+          (.then (fn [owner]
+                   (when-not (= generation (:generation owner))
+                     (s/transact! #(do (s/change-pane! id model/reconcile-owner owner (get @s/applied-extensions id))
+                                      (remember-owner! id owner)
+                                      (s/refresh! id)))
+                     (throw (js/Error. "Session changed · current metadata refreshed; review before retrying")))))))
+    (js/Promise.resolve nil)))
+
+(defn- mutate! [id command]
+  (if (get @s/session-ids id)
+    (-> (reconcile-before! id) (.then (fn [_] (api! command))))
+    (api! command)))
+
+(defn run!
+  ([id op] (run! id op true))
+  ([id op compiler-session?]
   (let [pane (model/pane @s/workspace id)
         extensions (model/extension-sources pane)
         source (case op "run" (:source pane) "extend" (:extensionDraft pane)
@@ -138,7 +166,8 @@
       (dispatch! [:development/commit id])
       (operation!
        id
-       #(-> (api! {:op op :pane id :source source :extensions (if (= op "run") extensions []) :generation (get @s/generations id)})
+       #(-> (mutate! id {:op op :pane id :source source :compilerSession compiler-session?
+                         :extensions (if (= op "run") extensions []) :generation (get @s/generations id)})
             (.then (fn [result]
                      (s/transact! (fn []
                       (s/change-pane! id
@@ -151,18 +180,19 @@
                         (s/change-pane! id layers/program-output mode))
                       (swap! s/errors dissoc id)
                       (swap! s/expansions dissoc id)
-                      (swap! s/generations assoc id (:generation result))
-                      (swap! s/session-ids assoc id (:sessionId result))
-                      (reset! s/message "Runtime updated · each block has an independent session"))))))))))
+                      (remember-owner! id result)
+                      (reset! s/message "Runtime updated · session continues when views close")))))))))))
 
 (defn spawn-slots! [id]
   (operation!
    id
-   #(-> (api! {:op "spawn-slot" :pane id :generation (get @s/generations id)})
-        (.then (fn [{:keys [source slots skipped generation displayMode]}]
+   #(-> (reconcile-before! id)
+        (.then (fn [_] (api! {:op "spawn-slot" :pane id :generation (get @s/generations id)})))
+        (.then (fn [{:keys [source slots skipped generation displayMode] :as result}]
                  (s/transact! (fn []
                   (when (seq slots)
                     (s/change-pane! id model/extended-source source)
+                    (remember-owner! id result)
                     (swap! s/expansions dissoc id))
                   (when displayMode (s/change-pane! id layers/program-output displayMode))
                   (swap! s/generations assoc id generation)
@@ -174,30 +204,37 @@
                                (when (seq skipped)
                                  (str " · " (count skipped) " scoped/computed slots cannot be filled from this block")))))))))))
 
+(declare persist-reconnect!)
+
 (defn restore!
   ([input] (restore! input {}))
   ([input options]
    (let [document (workspace/upgrade input)]
      (operation!
       nil
-      #(do
-         (reset! s/message "Rebuilding saved programs…")
-         (-> (api! {:op "restore" :workspace document})
-             (.then (fn [result]
-                      (s/transact! (fn []
-                       (reset! s/results {}) (reset! s/errors {}) (reset! s/expansions {})
-                       (reset! s/session-ids {})
+      #(-> (api! {:op "restore" :workspace document :reconnect (or (:reconnect options) {})})
+           (.then (fn [result]
+                    (s/transact!
+                     (fn []
+                       (doseq [cell [s/results s/errors s/expansions s/session-ids s/run-ids
+                                     s/applied-extensions s/reconnect s/generations]] (reset! cell {}))
                        (swap! s/remote assoc :development {} :topology {})
                        (swap! s/ui (fn [ui] (-> ui (assoc :panes-ui {}) (update :workspace-revision (fnil inc 0)))))
                        (reset! s/workspace
-                               (reduce (fn [doc [id mode]]
-                                         (model/update-pane doc (name id) layers/program-output mode))
-                                       document (:displayModes result)))
+                               (reduce (fn [doc [id owner]]
+                                         (let [id (name id)
+                                               references (:reconnect options)
+                                               prior (get references (keyword id) (get references id))]
+                                           (remember-owner! id owner)
+                                           (cond-> (model/update-pane doc id model/reconcile-owner owner (:appliedExtensions prior))
+                                             (:displayMode owner) (model/update-pane id layers/program-output (:displayMode owner)))))
+                                       document (:sessions result)))
                        (reset! s/selected-id (desktops/selected-id document))
-                       (when (contains? options :workspace-path)
-                         (reset! s/workspace-path (:workspace-path options)))
-                       (reset! s/generations (into {} (map (fn [[k v]] [(name k) v])) (:generations result)))
-                       (reset! s/message "Workspace restored · programs replayed in isolated sessions")))))))))))
+                       (when (contains? options :workspace-path) (reset! s/workspace-path (:workspace-path options)))
+                       ;; Even an empty reconciliation must overwrite a saved
+                       ;; reference: the initial remote map may already be empty.
+                       (persist-reconnect! @s/reconnect)
+                       (reset! s/message "Workspace restored · available sessions reconnected; missing sessions require Run"))))))))))
 
 (defn add-pane! [id axis]
   (when-not @s/busy?
@@ -217,7 +254,7 @@
                               (s/transact! (fn []
                                (reset! s/workspace next-document)
                                (reset! s/selected-id (desktops/selected-id next-document))
-                               (doseq [cell [s/generations s/session-ids s/errors s/results s/expansions s/refreshes]]
+                               (doseq [cell [s/generations s/session-ids s/run-ids s/applied-extensions s/reconnect s/errors s/results s/expansions s/refreshes]]
                                  (swap! cell dissoc id))))
                               (reset! s/message "Block closed · remaining sessions preserved")
                               (dom/focus-pane! @s/selected-id)))))))
@@ -235,7 +272,7 @@
                        (s/transact!
                         (fn []
                           (swap! s/workspace model/detach-pane id (model/new-pane))
-                          (doseq [cell [s/generations s/session-ids s/errors s/results s/expansions s/refreshes]]
+                          (doseq [cell [s/generations s/session-ids s/run-ids s/applied-extensions s/reconnect s/errors s/results s/expansions s/refreshes]]
                             (swap! cell dissoc id))
                           (swap! s/remote update :development dissoc id)
                           (reset! s/message "Session detached · runtime continues running")))
@@ -248,7 +285,7 @@
         (.then (fn [{:keys [sessions]}]
                  (reset! s/palette {:open? true :view :sessions
                                    :heading (if (= :reopen-running action)
-                                              "Reopen running session" "Stop detached session")
+                                              "Reopen running session" "Stop session")
                                    :commands (model/session-commands sessions action)
                                    :query "" :active 0}))))))
 
@@ -264,8 +301,7 @@
                      (s/transact!
                       (fn []
                         (swap! s/workspace model/spawn-pane (model/reopened-pane id result))
-                        (swap! s/generations assoc id (:generation result))
-                        (swap! s/session-ids assoc id (:sessionId result))
+                        (remember-owner! id result)
                         (s/select-pane! id)
                         (s/refresh! id)
                         (reset! s/message "Session reopened · live runtime preserved")))
@@ -275,7 +311,12 @@
   (operation!
    nil
    #(-> (api! {:op "stop-session" :sessionId session-id})
-        (.then (fn [_] (reset! s/message "Detached session stopped"))))))
+        (.then (fn [_]
+                 (s/transact!
+                  (fn [] (doseq [[id owner-id] @s/session-ids :when (= owner-id session-id)]
+                           (doseq [cell [s/generations s/session-ids s/run-ids s/applied-extensions s/reconnect s/results]]
+                             (swap! cell dissoc id)))))
+                 (reset! s/message "Session stopped"))))))
 
 (defn reopen-closed-block! [archive-id]
   (when-not @s/busy?
@@ -344,6 +385,17 @@
     (catch :default error
       (reset! s/message (str "Local draft storage: " (.-message error) ". Save JSON to keep your work.")))))
 
+(defn persist-reconnect! [references]
+  (try
+    (.setItem js/localStorage reconnect-storage-key (js/JSON.stringify (clj->js references)))
+    (catch :default error (reset! s/message (str "Reconnect storage: " (.-message error))))))
+
+(defn read-reconnect []
+  (try
+    (if-let [saved (.getItem js/localStorage reconnect-storage-key)]
+      (js->clj (js/JSON.parse saved) :keywordize-keys true) {})
+    (catch :default _ {})))
+
 (defn persist-workspace-path! [path]
   (try
     (if path
@@ -376,7 +428,24 @@
   (swap! s/ui update-in [:panes-ui id :presentation]
          #(if (= mode %) :normal mode)))
 
-(defn perform! [{:keys [action target archive session enabled]}]
+(defn remove-extension! [id extension-id]
+  (when (js/confirm "Remove this committed extension from runtime? The run and remaining effects will restart. Unrelated draft edits will stay unrun.")
+    (operation!
+     id
+     #(-> (reconcile-before! id)
+          (.then (fn [_] (api! {:op "remove-extension" :pane id :generation (get @s/generations id)
+                                :extensionId extension-id})))
+          (.then (fn [result]
+                   (s/transact!
+                    (fn []
+                      (s/change-pane! id model/remove-committed-extension (get @s/applied-extensions id) extension-id)
+                      (s/change-pane! id model/reconcile-owner result)
+                      (remember-owner! id result)
+                      (swap! s/expansions dissoc id)
+                      (s/refresh! id)
+                      (reset! s/message "Extension removed · replacement run active; drafts preserved")))))))))
+
+(defn perform! [{:keys [action target archive session extensionId enabled]}]
   (when enabled
     (case action
       :new-workspace (restore! (model/initial-workspace) {:workspace-path nil})
@@ -385,6 +454,10 @@
                      (reset! s/selected-id (desktops/selected-id @s/workspace))))
       :switch-desktop (s/switch-desktop! target)
       :run (run! target "run")
+      :run-legacy (run! target "run" false)
+      :close-extension-editor (swap! s/ui update-in [:panes-ui target :hidden-extension-editors] (fnil conj #{}) extensionId)
+      :reopen-extension-editor (swap! s/ui update-in [:panes-ui target :hidden-extension-editors] disj extensionId)
+      :remove-extension (remove-extension! target extensionId)
       :load (.click (.querySelector (dom/pane-root target) "input[type=file]"))
       :save-block (save-block! target)
       :split-row (add-pane! target "row")

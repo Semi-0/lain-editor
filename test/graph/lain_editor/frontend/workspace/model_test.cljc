@@ -1,5 +1,6 @@
 (ns graph.lain-editor.frontend.workspace.model-test
-  (:require #?(:clj [clojure.test :refer [deftest is]] :cljs [cljs.test :refer-macros [deftest is]])
+  (:require [clojure.string :as str]
+            #?(:clj [clojure.test :refer [deftest is]] :cljs [cljs.test :refer-macros [deftest is]])
             [graph.lain-editor.frontend.workspace.model :as model]
             [graph.lain-editor.frontend.development.model :as development-model]
             [graph.lain-editor.development.protocol :as development-protocol]
@@ -238,3 +239,49 @@
     (is (re-find #"Ready.*manual refresh" (model/status-text executed nil)))
     (is (thrown? #?(:clj Exception :cljs js/Error)
                  (workspace/validate (model/update-pane doc "a" assoc :autoRefresh "false"))))))
+
+(deftest reconnect-preserves-unsaved-source-and-extension-drafts
+  (let [pane (assoc (model/new-pane "a") :source "base draft" :executedSource "old base"
+                    :extensions ["old extension"] :extensionEdits ["edited extension"]
+                    :extensionDraft "pending extension")
+        owner {:sessionId "owner" :runId "run" :generation "fresh"
+               :source "committed base" :extensions ["committed extension"]}
+        reconciled (model/reconcile-owner pane owner)]
+    (is (= "base draft" (:source reconciled)))
+    (is (= "committed base" (:executedSource reconciled)))
+    (is (= ["edited extension"] (:extensionEdits reconciled)))
+    (is (= "pending extension" (:extensionDraft reconciled)))
+    (is (= ["committed extension"] (:extensions reconciled)))
+    (is (= {:sessionId "owner" :runId "run" :generation "fresh"} (model/reconnect-entry owner)))
+    (is (not (contains? reconciled :sessionId)))
+    (is (= "committed base" (:source (model/reconcile-owner (assoc pane :source "old base") owner))))))
+
+(deftest extension-removal-preserves-unrelated-draft-edits-and-orders
+  (let [pane (assoc (model/new-pane "a") :source "base draft" :executedSource "base"
+                    :extensions ["one" "two" "three"] :extensionEdits ["one draft" "two draft" "three draft"]
+                    :extensionDraft "pending")
+        applied [{:id "first" :source "one"} {:id "second" :source "two"} {:id "third" :source "three"}]
+        removed (model/remove-committed-extension pane applied "second")
+        commands (model/extension-commands "a" applied {"a" "generation"} false)]
+    (is (= ["one" "three"] (:extensions removed)))
+    (is (= ["one draft" "three draft"] (:extensionEdits removed)))
+    (is (= "base draft" (:source removed)))
+    (is (= "pending" (:extensionDraft removed)))
+    (is (= pane (model/remove-committed-extension pane applied "missing")))
+    (is (= 9 (count commands)))
+    (is (= #{:close-extension-editor :reopen-extension-editor :remove-extension} (set (map :action commands))))
+    (is (= #{"first" "second" "third"} (set (map :extensionId commands))))
+    (is (every? :enabled commands))
+    (is (not-any? :enabled (model/extension-commands "a" applied {"a" "generation"} true)))))
+
+(deftest reconnect-recovers-edits-to-an-extension-removed-by-another-view
+  (let [pane (assoc (model/new-pane "a") :extensions ["first" "second"]
+                    :extensionEdits ["first draft" "second draft"] :extensionDraft "pending")
+        prior [{:id "one" :source "first"} {:id "two" :source "second"}]
+        owner {:extensions ["second"] :appliedExtensions [{:id "two" :source "second"}]}
+        reconciled (model/reconcile-owner pane owner prior)]
+    (is (= ["second"] (:extensions reconciled)))
+    (is (= ["second draft"] (:extensionEdits reconciled)))
+    (is (str/includes? (:extensionDraft reconciled) "first draft"))
+    (is (str/includes? (:extensionDraft reconciled) "pending"))
+    (is (= 1 (count (:extensionEdits reconciled))))))

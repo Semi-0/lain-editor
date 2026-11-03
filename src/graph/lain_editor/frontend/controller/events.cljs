@@ -26,15 +26,17 @@
 
 (declare dispatch!)
 
-(defn- current-command [{:keys [action target archive session] :as command}]
+(defn- current-command [{:keys [action target archive session extensionId] :as command}]
   (let [target (or target @s/selected-id)
         available (if (contains? #{:reopen-running :stop-running} action)
                     @s/commands
-                    (into (model/commands @s/workspace target @s/generations @s/busy?)
+                    (into (model/commands @s/workspace target @s/generations @s/busy?
+                                          (get @s/applied-extensions target))
                           (model/desktop-commands @s/workspace @s/busy?)))]
     (or (some #(when (and (= action (:action %))
                          (= archive (:archive %))
                          (= session (:session %))
+                         (= extensionId (:extensionId %))
                          (= target (or (:target %) target))) %) available)
         (throw (ex-info "Unsupported editor command" {:command command})))))
 
@@ -171,15 +173,17 @@
 (defn- attach-storage! [scope]
   (let [saved (.getItem js/localStorage effects/storage-key)
         saved-path (.getItem js/localStorage effects/workspace-path-storage-key)
-        workspace-key (random-uuid) path-key (random-uuid)]
+        workspace-key (random-uuid) path-key (random-uuid) reconnect-key (random-uuid)]
     (add-watch s/workspace workspace-key (fn [_ _ _ document] (effects/persist! document)))
+    (add-watch s/reconnect reconnect-key (fn [_ _ _ refs] (effects/persist-reconnect! refs)))
     (add-watch s/workspace-path path-key (fn [_ _ _ path] (effects/persist-workspace-path! path)))
     (rx/own! scope #(do (remove-watch s/workspace workspace-key)
-                        (remove-watch s/workspace-path path-key)))
+                        (remove-watch s/workspace-path path-key)
+                        (remove-watch s/reconnect reconnect-key)))
     (if saved
       (try
         (effects/restore! (js->clj (js/JSON.parse saved) :keywordize-keys true)
-                          {:workspace-path saved-path})
+                          {:workspace-path saved-path :reconnect (effects/read-reconnect)})
         (catch :default error (reset! s/message (.-message error))))
       (effects/persist! @s/workspace))))
 

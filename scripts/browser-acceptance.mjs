@@ -28,6 +28,8 @@ const requiredChecks = [
   'split close and archive reopen preserve the draft',
   'save dialog cancels without writing files',
   'source extension reaches the existing runtime session',
+  'extension editor visibility and committed removal preserve drafts',
+  'refresh reconnects without replay and preserves drafts',
   'legacy example workspace restores through its public file input',
   'multi-node topology keeps exact rendered cards apart',
   'learned no-good values retain recursive structural rendering',
@@ -37,6 +39,8 @@ const requiredChecks = [
   'no browser errors were reported',
 ];
 const report = { url, startedAt: new Date().toISOString(), requiredChecks, checks: [], pageErrors: [], consoleErrors: [], passed: false };
+const temporaryOwners = new Set();
+const ownerResponses = [];
 let browser;
 let context;
 let page;
@@ -102,6 +106,16 @@ try {
   context = await browser.newContext({ storageState: process.env.LAIN_EDITOR_BROWSER_STORAGE_STATE, viewport: { width: 1440, height: 1000 } });
   page = await context.newPage();
   page.setDefaultTimeout(timeout);
+  page.on('response', response => {
+    if (new URL(response.url()).pathname === '/api' && response.request().method() === 'POST') {
+      const command = response.request().postDataJSON();
+      if (['run', 'open-session'].includes(command.op)) {
+        ownerResponses.push(response.json().then(body => {
+          if (body.ok && body.result.sessionId) temporaryOwners.add(body.result.sessionId);
+        }).catch(() => {}));
+      }
+    }
+  });
   page.on('pageerror', error => {
     report.pageErrors.push(error.message);
     console.error(`PAGE ERROR: ${error.stack}`);
@@ -416,6 +430,55 @@ try {
     await page.waitForFunction(() => document.querySelector('.pane.selected .value-view')?.textContent.includes('6'));
     assert.equal(await page.getByRole('textbox', { name: 'Extension 1 code', exact: true }).inputValue(), extension);
   });
+  await check('extension editor visibility and committed removal preserve drafts', async () => {
+    const api = async command => {
+      const response = await context.request.post(new URL('/api', url).href, { headers: { Origin: new URL(url).origin }, data: command });
+      const body = await response.json(); assert.equal(body.ok, true, body.error); return body.result;
+    };
+    const references = await page.evaluate(() => JSON.parse(localStorage.getItem('lain-tiled-editor-reconnect-v1')));
+    const ownerId = references[originalPane].sessionId;
+    const before = await api({ op: 'session-status', sessionId: ownerId });
+    const extension = '(define next (+ y 1))';
+    await paletteCommand(`Close extension editor · Extension 1 · ${extension}`);
+    assert.equal(await page.getByRole('textbox', { name: 'Extension 1 code', exact: true }).count(), 0);
+    const hidden = await api({ op: 'session-status', sessionId: ownerId });
+    assert.equal(hidden.runId, before.runId); assert.equal(hidden.generation, before.generation);
+    await paletteCommand(`Reopen extension editor · Extension 1 · ${extension}`);
+    assert.equal(await page.getByRole('textbox', { name: 'Extension 1 code', exact: true }).inputValue(), extension);
+    await page.getByRole('textbox', { name: 'Extension code', exact: true }).fill('(define retained 30)');
+    const applied = page.waitForResponse(r => new URL(r.url()).pathname === '/api' && r.request().method() === 'POST' && r.request().postDataJSON().op === 'extend');
+    await page.getByRole('button', { name: 'Apply extension', exact: true }).click();
+    assert.equal((await (await applied).json()).ok, true);
+    await page.getByRole('textbox', { name: 'Extension 2 code', exact: true }).fill('(define retained 99)');
+    await page.locator('.pane.selected textarea.code').first().fill(`${source}\n;; preserved base draft`);
+    await page.getByRole('textbox', { name: 'Extension code', exact: true }).fill('(define pending-draft 100)');
+    const removal = page.waitForResponse(r => new URL(r.url()).pathname === '/api' && r.request().method() === 'POST' && r.request().postDataJSON().op === 'remove-extension');
+    page.once('dialog', dialog => dialog.accept());
+    await paletteCommand(`Remove extension from runtime… · Extension 1 · ${extension}`);
+    const removed = await (await removal).json(); assert.equal(removed.ok, true, removed.error);
+    assert.equal(removed.result.sessionId, ownerId); assert.notEqual(removed.result.runId, before.runId);
+    assert.deepEqual(removed.result.extensions, ['(define retained 30)']);
+    assert.equal(await page.getByRole('textbox', { name: 'Extension 1 code', exact: true }).inputValue(), '(define retained 99)');
+    assert.match(await page.locator('.pane.selected textarea.code').first().inputValue(), /preserved base draft/);
+    assert.equal(await page.getByRole('textbox', { name: 'Extension code', exact: true }).inputValue(), '(define pending-draft 100)');
+    report.removal = { sessionId: ownerId, oldRunId: before.runId, runId: removed.result.runId, generation: removed.result.generation, appliedExtensions: removed.result.appliedExtensions };
+  });
+  await check('refresh reconnects without replay and preserves drafts', async () => {
+    const identity = report.removal;
+    const commands = [];
+    const observe = request => { if (new URL(request.url()).pathname === '/api' && request.method() === 'POST') commands.push(request.postDataJSON()); };
+    page.on('request', observe);
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForFunction(() => document.querySelector('.pane.selected textarea.code')?.value.includes('preserved base draft'));
+    const refs = await page.evaluate(() => JSON.parse(localStorage.getItem('lain-tiled-editor-reconnect-v1')));
+    assert.equal(refs[originalPane].sessionId, identity.sessionId); assert.equal(refs[originalPane].runId, identity.runId);
+    assert.equal(refs[originalPane].generation, identity.generation);
+    assert.equal(commands.filter(c => ['run', 'extend', 'open-session'].includes(c.op)).length, 0);
+    assert.equal(await page.getByRole('textbox', { name: 'Extension 1 code', exact: true }).inputValue(), '(define retained 99)');
+    page.off('request', observe);
+    report.reconnect = { ...identity, replayedCommands: 0 };
+    await page.screenshot({ path: join(output, 'session-reconnect.png'), fullPage: true });
+  });
   await check('legacy example workspace restores through its public file input', async () => {
     const bytes = await readFile(join(root, 'resources/example-workspace.json'));
     const fixture = JSON.parse(bytes.toString('utf8'));
@@ -432,6 +495,9 @@ try {
     assert.equal(body.ok, true, body.error);
     await page.waitForFunction(() => document.querySelectorAll('#workspace .pane').length === 3);
     assert.equal(await page.locator('.pane.selected textarea.code').first().inputValue(), fixture.panes[0].source);
+    assert.deepEqual(body.result.generations, {}, 'portable workspace import must restore drafts without executing');
+    // Explicit Run starts the fixture used by the following topology checks.
+    await paletteCommand('Run block');
   });
   await check('multi-node topology keeps exact rendered cards apart', async () => {
     await page.waitForFunction(() => {
@@ -477,6 +543,8 @@ try {
     const body = await result.json();
     assert.equal(body.ok, true, body.error);
     await page.waitForFunction(() => document.querySelector('.pane.selected')?.dataset.paneId === 'amb-search');
+    assert.deepEqual(body.result.generations, {});
+    await paletteCommand('Run block');
     await page.locator('.pane.selected .value-card').first().waitFor({ state: 'visible' });
     await page.waitForFunction(() => {
       const value = document.querySelector('.pane.selected .value-card');
@@ -499,6 +567,7 @@ try {
   });
   await check('recorded learning replay scrubs and inspects frozen values', async () => {
     await paletteCommand('Switch to desktop: 3');
+    await paletteCommand('Run block');
     await page.locator('.pane.selected .replay-view').waitFor({ state: 'visible' });
     const slider = page.getByRole('slider', { name: 'Recorded observation', exact: true });
     await page.waitForFunction(() => {
@@ -591,6 +660,22 @@ try {
     }
   }
 } finally {
+  await Promise.all(ownerResponses);
+  // Dispose the polling view before explicitly retiring its managed owners.
+  if (page !== undefined && !page.isClosed()) await page.goto('about:blank');
+  report.stoppedTemporaryOwners = [];
+  for (const sessionId of temporaryOwners) {
+    try {
+      const response = await context.request.post(new URL('/api', url).href, { headers: { Origin: new URL(url).origin }, data: { op: 'stop-session', sessionId } });
+      const body = await response.json();
+      if (!body.ok) throw new Error(body.error);
+      report.stoppedTemporaryOwners.push(sessionId);
+    } catch (error) {
+      report.cleanupError = error.message;
+      report.passed = false;
+      process.exitCode = 1;
+    }
+  }
   for (const name of requiredChecks) {
     if (!report.checks.some(check => check.name === name)) {
       report.checks.push({ name, outcome: 'not-run' });

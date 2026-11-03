@@ -38,7 +38,8 @@
        :spellcheck false :readonly (:busy? vm) :value (:source pane)
        :rows (extension-editors/source-rows (:source pane))
        :on {:input [[:workspace/edit-source id [:event/target.value]]]}}]
-     (extension-editors/view pane (:busy? vm))
+     (extension-editors/view pane (:busy? vm) (get-in vm [:applied-extensions (:id pane)])
+                             (get-in vm [:panes-ui (:id pane) :hidden-extension-editors] #{}))
      [:div.statebar {:hidden (not (some? error))}
       [:input {:replicant/key [id :source-file] :type "file" :hidden true
                :accept ".lain,.clj,.txt" :disabled (:busy? vm)

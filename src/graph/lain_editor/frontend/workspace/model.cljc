@@ -186,6 +186,49 @@
       (assoc :extensionDraft "")
       (dissoc :extensionEdits)))
 
+(defn reconnect-entry
+  "The pane-keyed reconnect record. It lives outside the portable document."
+  [result]
+  (select-keys result [:sessionId :runId :generation]))
+
+(defn reconcile-owner
+  "Refresh committed metadata; retain edits by stable extension ID and recover
+  edits to removed extensions into the pending draft rather than discarding them."
+  ([pane owner] (reconcile-owner pane owner nil))
+  ([pane owner previous-applied]
+   (let [committed (or (:extensions owner) (:extensions pane))
+         edits (:extensionEdits pane)
+         old (:extensions pane)
+         ids? (and (seq previous-applied) (seq (:appliedExtensions owner)))
+         indices (mapv (fn [index source]
+                         (if ids?
+                           (first (keep-indexed
+                                   (fn [old-index entry]
+                                     (when (= (:id entry) (:id (nth (:appliedExtensions owner) index nil))) old-index))
+                                   previous-applied))
+                           (if (= (count old) (count committed)) index
+                               (first (keep-indexed (fn [old-index text] (when (= text source) old-index)) old)))))
+                       (range) committed)
+         aligned (when edits (mapv (fn [index source] (if (some? index) (get edits index source) source)) indices committed))
+         recovered (when edits
+                     (keep-indexed (fn [index text]
+                                     (when (and (not (some #{index} indices)) (not= text (get old index))) text)) edits))]
+     (cond-> pane
+       (and (contains? owner :source) (= (:source pane) (:executedSource pane))) (assoc :source (:source owner))
+       (contains? owner :source) (assoc :executedSource (:source owner))
+       (contains? owner :extensions) (assoc :extensions committed)
+       edits (dissoc :extensionEdits)
+       (and edits (not= aligned committed)) (assoc :extensionEdits aligned)
+       (seq recovered) (update :extensionDraft #(str % "\n\n;; Recovered extension draft\n" (str/join "\n\n" recovered)))))))
+
+(defn remove-committed-extension [pane applied extension-id]
+  (let [index (first (keep-indexed #(when (= extension-id (:id %2)) %1) applied))
+        without (fn [items] (into (subvec (vec items) 0 index) (subvec (vec items) (inc index))))]
+    (if (some? index)
+      (cond-> (update pane :extensions without)
+        (:extensionEdits pane) (update :extensionEdits without))
+      pane)))
+
 (defn committed-source [pane source extensions]
   (-> pane
       (assoc :executedSource source :extensions extensions)
@@ -209,7 +252,8 @@
    [:split-row "Split side by side"] [:split-column "Split stacked"]
    [:spawn "Spawn new block"] [:spawn-slot "Spawn slot"] [:close "Close block"]
    [:detach-session "Detach running session"]
-   [:reopen-session "Reopen running session"] [:stop-session "Stop detached session"]
+   [:reopen-session "Reopen running session"] [:stop-session "Stop session"]
+   [:run-legacy "Run block (legacy runtime)"]
    [:value "Show value"] [:cell "Show cell details"] [:graph "Show topology"]
    [:upstream "Trace upstream"] [:downstream "Trace downstream"] [:both "Trace both directions"]
    [:toggle-fullscreen "Toggle fullscreen visualizer"]
@@ -222,8 +266,22 @@
    [:new-workspace "New workspace"] [:save "Save workspace"]
    [:save-as "Save workspace as…"] [:open "Open workspace JSON…"]])
 
-(defn commands [document id generations busy?]
-  (let [p (pane document id)]
+(defn extension-commands [pane-id applied generations busy?]
+  (vec (mapcat (fn [[index {:keys [id source]}]]
+                 (mapv (fn [[action label]]
+                         {:action action :target pane-id :extensionId id
+                          :enabled (and (not busy?) (some? (get generations pane-id)))
+                          :label (str label " · Extension " (inc index) " · "
+                                      (subs source 0 (min 48 (count source))))})
+                       [[:close-extension-editor "Close extension editor"]
+                        [:reopen-extension-editor "Reopen extension editor"]
+                        [:remove-extension "Remove extension from runtime…"]]))
+               (map-indexed vector (filter :id applied)))))
+
+(defn commands
+  ([document id generations busy?] (commands document id generations busy? nil))
+  ([document id generations busy? applied]
+   (let [p (pane document id)]
     (into
      (mapv (fn [[action label]]
              {:action action :label (if (and (= action :toggle-auto-refresh) (= false (:autoRefresh p)))
@@ -246,11 +304,12 @@
                                            (not (str/blank? (:extensionDraft p))))
                               true))})
            command-specs)
-     (map (fn [entry]
+     (concat (map (fn [entry]
             {:action :reopen-closed :archive (:id entry) :target id
              :label (closed-block-label entry)
              :enabled (and (not busy?) (< (count (:panes document)) 64))})
-          (reverse (get document :closedBlocks []))))))
+          (reverse (get document :closedBlocks [])))
+     (extension-commands id applied generations busy?))))))
 
 (defn desktop-commands [document busy?]
   (into [{:action :new-desktop :label "New desktop" :enabled (and (not busy?) (< (count (:panes document)) 64))}]

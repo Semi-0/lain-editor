@@ -14,7 +14,8 @@
           :panes-ui {} :expansions {} :refreshes {} :tick 0 :workspace-revision 0
           :message "Local runtime · independent blocks"
           :palette {:open? false :target nil :query "" :active 0}}
-     :remote {:generations {} :errors {} :results {} :development {}}}))
+     :remote {:generations {} :errors {} :results {} :development {}
+              :session-ids {} :run-ids {} :applied-extensions {} :reconnect {}}}))
 
 (defonce source (atom (initial (model/initial-workspace))))
 (defonce ui (rx/lens source :ui #(assoc %1 :ui %2)))
@@ -36,6 +37,9 @@
 (defonce connection (ui-cell :connection))
 (defonce generations (remote-cell :generations))
 (defonce session-ids (remote-cell :session-ids))
+(defonce run-ids (remote-cell :run-ids))
+(defonce applied-extensions (remote-cell :applied-extensions))
+(defonce reconnect (remote-cell :reconnect))
 (defonce errors (remote-cell :errors))
 (defonce results (remote-cell :results))
 (defonce expansions (ui-cell :expansions))
@@ -72,7 +76,9 @@
                    (mapv #(assoc % :enabled (not (:busy? authoritative-ui)))
                          (get-in authoritative-ui [:palette :commands]))
                    (into (model/commands document (get-in authoritative-ui [:palette :target])
-                                        (:generations observed) (:busy? authoritative-ui))
+                                        (:generations observed) (:busy? authoritative-ui)
+                                        (get-in observed [:applied-extensions
+                                                         (get-in authoritative-ui [:palette :target])]))
                          (model/desktop-commands document (:busy? authoritative-ui))))
         pane-views (reduce (fn [views pane]
                              (assoc-in views [(:id pane) :development]
