@@ -34,6 +34,13 @@ Application files and examples mentioned below live in the configured backend pr
   **Apply extension** adds it to that tile's existing bindings and
   topology. Successful extensions are retained in order. It is an append
   operation, not hot replacement of an individual definition or file.
+- **Close extension editor / Reopen extension editor** hide or reveal each saved
+  extension editor without changing its code or running anything. These commands
+  also work after a backend restart or a workspace import. **Remove extension
+  from runtime…** is available for extensions in an active session API run and
+  confirms a restart of the run and remaining effects. If there is no matching
+  live runtime, it stays visible but disabled with an explanation; Run explicitly
+  to start the saved program again.
 - **Spawn slot** scans the selected block's current application declarations and
   applies one ordinary extension defining its unresolved callable bindings. For
   `(consume-task agents queue)`, it generates

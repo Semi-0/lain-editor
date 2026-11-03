@@ -30,6 +30,7 @@ const requiredChecks = [
   'source extension reaches the existing runtime session',
   'extension editor visibility and committed removal preserve drafts',
   'refresh reconnects without replay and preserves drafts',
+  'restored extension editors retain palette controls without runtime metadata',
   'legacy example workspace restores through its public file input',
   'multi-node topology keeps exact rendered cards apart',
   'learned no-good values retain recursive structural rendering',
@@ -479,6 +480,35 @@ try {
     page.off('request', observe);
     report.reconnect = { ...identity, replayedCommands: 0 };
     await page.screenshot({ path: join(output, 'session-reconnect.png'), fullPage: true });
+  });
+  await check('restored extension editors retain palette controls without runtime metadata', async () => {
+    const document = await page.evaluate(() => JSON.parse(localStorage.getItem('lain-tiled-editor-v1')));
+    const pane = document.panes.find(pane => pane.id === originalPane);
+    const extension = (pane.extensionEdits ?? pane.extensions)[0];
+    assert.ok(extension);
+    const commands = [];
+    const observe = request => { if (new URL(request.url()).pathname === '/api' && request.method() === 'POST') commands.push(request.postDataJSON()); };
+    page.on('request', observe);
+    await page.locator('#open').setInputFiles({ name: 'extension-controls.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(document)) });
+    const save = page.getByRole('dialog', { name: 'Save uploaded file', exact: true });
+    await save.getByRole('textbox', { name: 'Workspace-relative file path' }).fill('browser-acceptance/extension-controls.json');
+    await save.getByRole('checkbox').check();
+    await save.getByRole('button', { name: 'Save file', exact: true }).click();
+    await save.waitFor({ state: 'hidden' });
+    await page.locator(`.pane[data-pane-id="${originalPane}"] textarea.code`).first().click();
+    await paletteCommand(`Close extension editor · Extension 1 · ${extension.slice(0, 48)}`);
+    assert.equal(await page.getByRole('textbox', { name: 'Extension 1 code', exact: true }).count(), 0);
+    await paletteCommand(`Reopen extension editor · Extension 1 · ${extension.slice(0, 48)}`);
+    assert.equal(await page.getByRole('textbox', { name: 'Extension 1 code', exact: true }).inputValue(), extension);
+    await page.keyboard.press('Control+k');
+    const palette = page.locator('dialog.command-palette');
+    await palette.getByRole('searchbox', { name: 'Search commands' }).fill('Remove extension from runtime');
+    const remove = palette.getByRole('button', { name: `Remove extension from runtime… · Extension 1 · ${extension.slice(0, 48)}`, exact: true });
+    assert.equal(await remove.isDisabled(), true);
+    assert.match(await remove.getAttribute('title'), /active session API run/);
+    await page.keyboard.press('Escape');
+    page.off('request', observe);
+    assert.equal(commands.filter(command => ['run', 'extend', 'remove-extension', 'open-session'].includes(command.op)).length, 0);
   });
   await check('legacy example workspace restores through its public file input', async () => {
     const bytes = await readFile(join(root, 'resources/example-workspace.json'));

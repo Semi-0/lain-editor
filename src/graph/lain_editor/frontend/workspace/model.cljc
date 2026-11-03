@@ -267,17 +267,26 @@
    [:new-workspace "New workspace"] [:save "Save workspace"]
    [:save-as "Save workspace as…"] [:open "Open workspace…"]])
 
-(defn extension-commands [pane-id applied generations busy?]
-  (vec (mapcat (fn [[index {:keys [id source]}]]
-                 (mapv (fn [[action label]]
-                         {:action action :target pane-id :extensionId id
-                          :enabled (and (not busy?) (some? (get generations pane-id)))
-                          :label (str label " · Extension " (inc index) " · "
-                                      (subs source 0 (min 48 (count source))))})
-                       [[:close-extension-editor "Close extension editor"]
-                        [:reopen-extension-editor "Reopen extension editor"]
-                        [:remove-extension "Remove extension from runtime…"]]))
-               (map-indexed vector (filter :id applied)))))
+(defn extension-commands
+  ([pane-id applied generations busy?]
+   (extension-commands pane-id applied generations busy? (mapv :source applied)))
+  ([pane-id applied generations busy? sources]
+   (vec (mapcat
+         (fn [[index source]]
+           (let [runtime-id (:id (nth applied index nil))
+                 extension-id (or runtime-id index)
+                 removable? (and runtime-id (some? (get generations pane-id)))]
+             (mapv (fn [[action label]]
+                     (cond-> {:action action :target pane-id :extensionId extension-id
+                              :enabled (and (not busy?) (or (not= action :remove-extension) removable?))
+                              :label (str label " · Extension " (inc index) " · "
+                                          (subs source 0 (min 48 (count source))))}
+                       (and (= action :remove-extension) (not removable?))
+                       (assoc :disabled-reason "Runtime removal requires an active session API run. Restored drafts and legacy runs can still close their editors.")))
+                   [[:close-extension-editor "Close extension editor"]
+                    [:reopen-extension-editor "Reopen extension editor"]
+                    [:remove-extension "Remove extension from runtime…"]])))
+         (map-indexed vector sources)))))
 
 (defn commands
   ([document id generations busy?] (commands document id generations busy? nil))
@@ -311,7 +320,7 @@
                       :label (closed-block-label entry)
                       :enabled (and (not busy?) (< (count (:panes document)) 64))})
                    (reverse (get document :closedBlocks [])))
-              (extension-commands id applied generations busy?))))))
+              (extension-commands id applied generations busy? (extension-sources p)))))))
 
 (defn desktop-commands [document busy?]
   (into [{:action :new-desktop :label "New desktop" :enabled (and (not busy?) (< (count (:panes document)) 64))}]

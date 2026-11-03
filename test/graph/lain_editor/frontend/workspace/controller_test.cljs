@@ -16,10 +16,10 @@
         result #js {:scrollHeight 300
                     :getBoundingClientRect (fn [] #js {:height (second @heights)})}
         root #js {:querySelector (fn [selector]
-                                  (case selector
-                                    ".layer-code" code
-                                    ".layer-result" result
-                                    nil))}]
+                                   (case selector
+                                     ".layer-code" code
+                                     ".layer-result" result
+                                     nil))}]
     (try
       (reset! s/source (s/initial initial))
       (dom/dispatch! [:dom/pane-updated id root])
@@ -77,70 +77,70 @@
 
 (deftest late-http-responses-cannot-restore-closed-or-newer-generations
   (async done
-    (let [before @s/source fetch (.-fetch js/globalThis)
-          document (model/initial-workspace)
-          id (:id (first (:panes document)))
-          pending (atom [])
-          fake-fetch (fn [_ _]
-                       (js/Promise. (fn [resolve _] (swap! pending conj resolve))))
-          succeed! (fn [resolve]
-                     (resolve #js {:json (fn [] (js/Promise.resolve
-                                                #js {:ok true :result #js {:value "late"}}))}))]
-      (reset! s/source (s/initial (model/split-pane document id "row" (model/new-pane "other"))))
-      (reset! s/generations {id "old"})
-      (set! (.-fetch js/globalThis) fake-fetch)
-      (let [closed (effects/api! {:op "inspect" :pane id :generation "old"})]
-        (swap! s/workspace model/close-pane id "archive")
-        (succeed! (first @pending))
-        (-> closed
-            (.then (fn [_] (is false "A closed pane must reject its late response")))
-            (.catch (fn [error] (is (effects/cancelled? error))))
-            (.then (fn [_]
-                     (reset! s/workspace document)
-                     (reset! s/generations {id "old"})
-                     (let [stale (effects/api! {:op "inspect" :pane id :generation "old"})]
-                       (swap! s/generations assoc id "new")
-                       (succeed! (second @pending))
-                       (-> stale
-                           (.then (fn [_] (is false "A newer generation must reject its predecessor")))
-                           (.catch (fn [error] (is (effects/cancelled? error))))))))
-            (.then (fn [_]
-                     (let [disposed (effects/api! {:op "workspace-poll"})]
-                       (effects/dispose!)
-                       (succeed! (nth @pending 2))
-                       (-> disposed
-                           (.then (fn [_] (is false "Disposal must reject already-completing requests")))
-                           (.catch (fn [error] (is (effects/cancelled? error))))))))
-            (.catch (fn [error] (is false (str "Unexpected controller failure: " error))))
-            (.finally (fn []
-                        (set! (.-fetch js/globalThis) fetch)
-                        (reset! s/source before)
-                        (done))))))))
+         (let [before @s/source fetch (.-fetch js/globalThis)
+               document (model/initial-workspace)
+               id (:id (first (:panes document)))
+               pending (atom [])
+               fake-fetch (fn [_ _]
+                            (js/Promise. (fn [resolve _] (swap! pending conj resolve))))
+               succeed! (fn [resolve]
+                          (resolve #js {:json (fn [] (js/Promise.resolve
+                                                      #js {:ok true :result #js {:value "late"}}))}))]
+           (reset! s/source (s/initial (model/split-pane document id "row" (model/new-pane "other"))))
+           (reset! s/generations {id "old"})
+           (set! (.-fetch js/globalThis) fake-fetch)
+           (let [closed (effects/api! {:op "inspect" :pane id :generation "old"})]
+             (swap! s/workspace model/close-pane id "archive")
+             (succeed! (first @pending))
+             (-> closed
+                 (.then (fn [_] (is false "A closed pane must reject its late response")))
+                 (.catch (fn [error] (is (effects/cancelled? error))))
+                 (.then (fn [_]
+                          (reset! s/workspace document)
+                          (reset! s/generations {id "old"})
+                          (let [stale (effects/api! {:op "inspect" :pane id :generation "old"})]
+                            (swap! s/generations assoc id "new")
+                            (succeed! (second @pending))
+                            (-> stale
+                                (.then (fn [_] (is false "A newer generation must reject its predecessor")))
+                                (.catch (fn [error] (is (effects/cancelled? error))))))))
+                 (.then (fn [_]
+                          (let [disposed (effects/api! {:op "workspace-poll"})]
+                            (effects/dispose!)
+                            (succeed! (nth @pending 2))
+                            (-> disposed
+                                (.then (fn [_] (is false "Disposal must reject already-completing requests")))
+                                (.catch (fn [error] (is (effects/cancelled? error))))))))
+                 (.catch (fn [error] (is false (str "Unexpected controller failure: " error))))
+                 (.finally (fn []
+                             (set! (.-fetch js/globalThis) fetch)
+                             (reset! s/source before)
+                             (done))))))))
 
 (deftest disposal-stops-queued-effects-and-stale-file-loads
   (async done
-    (let [before @s/source document (model/initial-workspace)
-          id (:id (first (:panes document)))
-          resolve-file (atom nil)
-          file #js {:name "older.lain"
-                    :text (fn [] (js/Promise. (fn [resolve _] (reset! resolve-file resolve))))}
-          called (atom 0)]
-      (reset! s/source (s/initial document))
-      (let [loading (effects/load-file! id file)]
-        (s/change-pane! id assoc :source "newer user edit")
-        (@resolve-file "older file content")
-        (-> loading
-            (.then (fn [_]
-                     (is (= "newer user edit" (:source (model/pane @s/workspace id))))
-                     (let [queued (effects/operation! id #(swap! called inc))]
-                       (effects/dispose!)
-                       queued)))
-            (.then (fn [_]
-                     (is (zero? @called))
-                     (is (false? @s/busy?))
-                     (is (nil? @s/pending-id))))
-            (.catch (fn [error] (is false (str "Unexpected lifecycle failure: " error))))
-            (.finally (fn [] (reset! s/source before) (done))))))))
+         (let [before @s/source document (model/initial-workspace)
+               id (:id (first (:panes document)))
+               resolve-file (atom nil)
+               file #js {:name "older.lain"
+                         :text (fn [] (js/Promise. (fn [resolve _] (reset! resolve-file resolve))))}
+               called (atom 0)]
+           (reset! s/source (s/initial document))
+           (let [loading (effects/load-file! id file)]
+             (s/change-pane! id assoc :source "newer user edit")
+             (@resolve-file "older file content")
+             (-> loading
+                 (.then (fn [_]
+                          (is (= "newer user edit" (:source (model/pane @s/workspace id))))
+                          (let [queued (effects/operation! id #(swap! called inc))]
+                            (effects/dispose!)
+                            queued)))
+                 (.then (fn [_]
+                          (is (zero? @called))
+                          (is (false? @s/busy?))
+                          (is (nil? @s/pending-id))))
+                 (.catch (fn [error] (is false (str "Unexpected lifecycle failure: " error))))
+                 (.finally (fn [] (reset! s/source before) (done))))))))
 
 (deftest disposing-an-old-handler-preserves-its-replacement
   (let [calls (atom [])
@@ -158,102 +158,102 @@
 
 (deftest detach-keeps-local-state-until-success-and-never-closes
   (async done
-    (let [before @s/source fetch (.-fetch js/globalThis)
-          document (model/initial-workspace) id (:id (first (:panes document)))
-          calls (atom []) pending (atom nil)
-          response! (fn [body]
-                      (@pending #js {:json #(js/Promise.resolve (clj->js body))}))]
-      (reset! s/source (s/initial (model/update-pane document id assoc :executedSource "")))
-      (reset! s/generations {id "generation"})
-      (set! (.-fetch js/globalThis)
-            (fn [_ options]
-              (swap! calls conj (js->clj (js/JSON.parse (.-body options)) :keywordize-keys true))
-              (js/Promise. (fn [resolve _] (reset! pending resolve)))))
-      (let [failed (effects/detach-session! id)]
-        (-> (js/Promise.resolve nil)
-            (.then (fn [_]
-                     (is (some? (model/pane @s/workspace id)))
-                     (response! {:ok false :error "Session disappeared"})
-                     failed))
-            (.then (fn [_]
-                     (is (some? (model/pane @s/workspace id)))
-                     (is (= "generation" (get @s/generations id)))
-                     (is (= "Session disappeared" (get @s/errors id)))
-                     (let [detaching (effects/detach-session! id)]
-                       (-> (js/Promise.resolve nil)
-                           (.then (fn [_]
-                                    (response! {:ok true :result {}})
-                                    detaching))))))
-            (.then (fn [_]
-                     (is (nil? (model/pane @s/workspace id)))
-                     (is (nil? (get @s/generations id)))
-                     (is (empty? (:closedBlocks @s/workspace)))
-                     (is (= [{:op "detach-session" :pane id :generation "generation"}
-                             {:op "detach-session" :pane id :generation "generation"}] @calls))))
-            (.catch (fn [error] (is false (str error))))
-            (.finally (fn []
-                        (set! (.-fetch js/globalThis) fetch)
-                        (reset! s/source before)
-                        (done))))))))
+         (let [before @s/source fetch (.-fetch js/globalThis)
+               document (model/initial-workspace) id (:id (first (:panes document)))
+               calls (atom []) pending (atom nil)
+               response! (fn [body]
+                           (@pending #js {:json #(js/Promise.resolve (clj->js body))}))]
+           (reset! s/source (s/initial (model/update-pane document id assoc :executedSource "")))
+           (reset! s/generations {id "generation"})
+           (set! (.-fetch js/globalThis)
+                 (fn [_ options]
+                   (swap! calls conj (js->clj (js/JSON.parse (.-body options)) :keywordize-keys true))
+                   (js/Promise. (fn [resolve _] (reset! pending resolve)))))
+           (let [failed (effects/detach-session! id)]
+             (-> (js/Promise.resolve nil)
+                 (.then (fn [_]
+                          (is (some? (model/pane @s/workspace id)))
+                          (response! {:ok false :error "Session disappeared"})
+                          failed))
+                 (.then (fn [_]
+                          (is (some? (model/pane @s/workspace id)))
+                          (is (= "generation" (get @s/generations id)))
+                          (is (= "Session disappeared" (get @s/errors id)))
+                          (let [detaching (effects/detach-session! id)]
+                            (-> (js/Promise.resolve nil)
+                                (.then (fn [_]
+                                         (response! {:ok true :result {}})
+                                         detaching))))))
+                 (.then (fn [_]
+                          (is (nil? (model/pane @s/workspace id)))
+                          (is (nil? (get @s/generations id)))
+                          (is (empty? (:closedBlocks @s/workspace)))
+                          (is (= [{:op "detach-session" :pane id :generation "generation"}
+                                  {:op "detach-session" :pane id :generation "generation"}] @calls))))
+                 (.catch (fn [error] (is false (str error))))
+                 (.finally (fn []
+                             (set! (.-fetch js/globalThis) fetch)
+                             (reset! s/source before)
+                             (done))))))))
 
 (deftest reopen-and-stop-use-live-session-api-with-atomic-local-updates
   (async done
-    (let [before @s/source fetch (.-fetch js/globalThis)
-          document (model/initial-workspace) calls (atom [])
-          reply (atom {:ok true :result {:sessions []}})
-          result {:sessionId "live" :generation "original" :source "(display 42)"
-                  :extensions ["(define extra 9)"] :displayMode "value"}]
-      (reset! s/source (s/initial document))
-      (set! (.-fetch js/globalThis)
-            (fn [_ options]
-              (swap! calls conj (js->clj (js/JSON.parse (.-body options)) :keywordize-keys true))
-              (js/Promise.resolve #js {:status (if (:ok @reply) 200 400) :ok (:ok @reply)
-                                        :json #(js/Promise.resolve (clj->js @reply))})))
-      (-> (effects/pick-session! :reopen-running)
-          (.then (fn [_]
-                   (is (= :sessions (:view @s/palette)))
-                   (is (empty? (:visible-commands (s/snapshot @s/source))))
-                   (reset! reply {:ok true :result {:sessions [{:sessionId "live" :pane "old-pane"
-                                                              :source "(display 42)" :extensions []}]}})
-                   (effects/pick-session! :reopen-running)))
-          (.then (fn [_]
-                   (swap! s/palette assoc :query "old-pane 42 live")
-                   (is (= 1 (count (:visible-commands (s/snapshot @s/source)))))
-                   (swap! s/palette assoc :query "missing")
-                   (is (empty? (:visible-commands (s/snapshot @s/source))))
-                   (reset! reply {:ok false :error "Detached session not found or already attached"})
-                   (effects/reopen-session! "live")))
-          (.then (fn [_]
-                   (is (= document @s/workspace))
-                   (is (= "Detached session not found or already attached" @s/message))
-                   (reset! reply {:ok true :result result})
-                   (effects/reopen-session! "live")))
-          (.then (fn [_]
-                   (let [id @s/selected-id p (model/pane @s/workspace id)]
-                     (is (not= id (:id (first (:panes document)))))
-                     (is (= (:source result) (:source p) (:executedSource p)))
-                     (is (= (:extensions result) (:extensions p)))
-                     (is (= "original" (get @s/generations id)))
-                     (is (= "live" (get @s/session-ids id)))
-                     (is (= "@display" (get-in p [:display :cell])))
-                     (is (= 1 (get @s/refreshes id))))
-                   (reset! reply {:ok false :error "Session disappeared"})
-                   (effects/stop-session! "gone")))
-          (.then (fn [_]
-                   (is (= "Session disappeared" @s/message))
-                   (is (= 2 (count (:panes @s/workspace))))
-                   (reset! reply {:ok true :result {:stopped "other"}})
-                   (effects/stop-session! "other")))
-          (.then (fn [_]
-                   (is (= "Session stopped" @s/message))
-                   (is (= ["list-sessions" "list-sessions" "reopen-session" "reopen-session"
-                           "stop-session" "stop-session"] (mapv :op @calls)))
-                   (is (= "live" (:sessionId (nth @calls 3))))))
-          (.catch (fn [error] (is false (str error))))
-          (.finally (fn []
-                      (set! (.-fetch js/globalThis) fetch)
-                      (reset! s/source before)
-                      (done)))))))
+         (let [before @s/source fetch (.-fetch js/globalThis)
+               document (model/initial-workspace) calls (atom [])
+               reply (atom {:ok true :result {:sessions []}})
+               result {:sessionId "live" :generation "original" :source "(display 42)"
+                       :extensions ["(define extra 9)"] :displayMode "value"}]
+           (reset! s/source (s/initial document))
+           (set! (.-fetch js/globalThis)
+                 (fn [_ options]
+                   (swap! calls conj (js->clj (js/JSON.parse (.-body options)) :keywordize-keys true))
+                   (js/Promise.resolve #js {:status (if (:ok @reply) 200 400) :ok (:ok @reply)
+                                            :json #(js/Promise.resolve (clj->js @reply))})))
+           (-> (effects/pick-session! :reopen-running)
+               (.then (fn [_]
+                        (is (= :sessions (:view @s/palette)))
+                        (is (empty? (:visible-commands (s/snapshot @s/source))))
+                        (reset! reply {:ok true :result {:sessions [{:sessionId "live" :pane "old-pane"
+                                                                     :source "(display 42)" :extensions []}]}})
+                        (effects/pick-session! :reopen-running)))
+               (.then (fn [_]
+                        (swap! s/palette assoc :query "old-pane 42 live")
+                        (is (= 1 (count (:visible-commands (s/snapshot @s/source)))))
+                        (swap! s/palette assoc :query "missing")
+                        (is (empty? (:visible-commands (s/snapshot @s/source))))
+                        (reset! reply {:ok false :error "Detached session not found or already attached"})
+                        (effects/reopen-session! "live")))
+               (.then (fn [_]
+                        (is (= document @s/workspace))
+                        (is (= "Detached session not found or already attached" @s/message))
+                        (reset! reply {:ok true :result result})
+                        (effects/reopen-session! "live")))
+               (.then (fn [_]
+                        (let [id @s/selected-id p (model/pane @s/workspace id)]
+                          (is (not= id (:id (first (:panes document)))))
+                          (is (= (:source result) (:source p) (:executedSource p)))
+                          (is (= (:extensions result) (:extensions p)))
+                          (is (= "original" (get @s/generations id)))
+                          (is (= "live" (get @s/session-ids id)))
+                          (is (= "@display" (get-in p [:display :cell])))
+                          (is (= 1 (get @s/refreshes id))))
+                        (reset! reply {:ok false :error "Session disappeared"})
+                        (effects/stop-session! "gone")))
+               (.then (fn [_]
+                        (is (= "Session disappeared" @s/message))
+                        (is (= 2 (count (:panes @s/workspace))))
+                        (reset! reply {:ok true :result {:stopped "other"}})
+                        (effects/stop-session! "other")))
+               (.then (fn [_]
+                        (is (= "Session stopped" @s/message))
+                        (is (= ["list-sessions" "list-sessions" "reopen-session" "reopen-session"
+                                "stop-session" "stop-session"] (mapv :op @calls)))
+                        (is (= "live" (:sessionId (nth @calls 3))))))
+               (.catch (fn [error] (is false (str error))))
+               (.finally (fn []
+                           (set! (.-fetch js/globalThis) fetch)
+                           (reset! s/source before)
+                           (done)))))))
 
 (deftest cancelling-draft-discard-does-not-detach
   (let [before @s/source confirm (aget js/globalThis "confirm")
@@ -261,7 +261,7 @@
         warnings (atom [])]
     (try
       (reset! s/source (s/initial (model/update-pane document id assoc
-                                                  :source "edited" :executedSource "executed")))
+                                                     :source "edited" :executedSource "executed")))
       (reset! s/generations {id "generation"})
       (aset js/globalThis "confirm" (fn [message] (swap! warnings conj message) false))
       (let [unchanged @s/source]
@@ -323,22 +323,38 @@
 
 (deftest empty-reconciliation-persists-removal-of-missing-owner-references
   (async done
-    (let [before @s/source original-fetch (.-fetch js/globalThis)
-          original-storage (.-localStorage js/globalThis)
-          stored (atom {effects/reconnect-storage-key "{\"old\":{\"sessionId\":\"missing\"}}"})
-          document (model/initial-workspace)]
+         (let [before @s/source original-fetch (.-fetch js/globalThis)
+               original-storage (.-localStorage js/globalThis)
+               stored (atom {effects/reconnect-storage-key "{\"old\":{\"sessionId\":\"missing\"}}"})
+               document (model/initial-workspace)]
+           (reset! s/source (s/initial document))
+           (set! (.-localStorage js/globalThis) #js {:setItem (fn [key value] (swap! stored assoc key value))})
+           (set! (.-fetch js/globalThis)
+                 (fn [& _] (js/Promise.resolve #js {:json (fn [] (js/Promise.resolve #js {:ok true :result #js {:sessions #js {} :generations #js {} :displayModes #js {}}}))})))
+           (-> (effects/restore! document {:reconnect {"old" {:sessionId "missing"}}})
+               (.then (fn [_]
+                        (is (= {} @s/reconnect))
+                        (is (= {} (js->clj (js/JSON.parse (get @stored effects/reconnect-storage-key)))))
+                        (is (= {} @s/generations))))
+               (.catch (fn [error] (is false (str error))))
+               (.finally (fn []
+                           (set! (.-fetch js/globalThis) original-fetch)
+                           (set! (.-localStorage js/globalThis) original-storage)
+                           (reset! s/source before)
+                           (done)))))))
+
+(deftest restored-extension-editors-close-without-running-or-losing-source
+  (let [before @s/source
+        document (model/initial-workspace)
+        id (:id (first (:panes document)))
+        document (model/update-pane document id assoc :extensions ["first" "second"])]
+    (try
       (reset! s/source (s/initial document))
-      (set! (.-localStorage js/globalThis) #js {:setItem (fn [key value] (swap! stored assoc key value))})
-      (set! (.-fetch js/globalThis)
-            (fn [& _] (js/Promise.resolve #js {:json (fn [] (js/Promise.resolve #js {:ok true :result #js {:sessions #js {} :generations #js {} :displayModes #js {}}}))})))
-      (-> (effects/restore! document {:reconnect {"old" {:sessionId "missing"}}})
-          (.then (fn [_]
-                   (is (= {} @s/reconnect))
-                   (is (= {} (js->clj (js/JSON.parse (get @stored effects/reconnect-storage-key)))))
-                   (is (= {} @s/generations))))
-          (.catch (fn [error] (is false (str error))))
-          (.finally (fn []
-                      (set! (.-fetch js/globalThis) original-fetch)
-                      (set! (.-localStorage js/globalThis) original-storage)
-                      (reset! s/source before)
-                      (done)))))))
+      (events/dispatch! [:workspace/command {:action :close-extension-editor :target id :extensionId 1}])
+      (is (= #{1} (get-in @s/ui [:panes-ui id :hidden-extension-editors])))
+      (is (= document @s/workspace))
+      (is (empty? @s/generations))
+      (events/dispatch! [:workspace/command {:action :reopen-extension-editor :target id :extensionId 1}])
+      (is (= #{} (get-in @s/ui [:panes-ui id :hidden-extension-editors])))
+      (is (= document @s/workspace))
+      (finally (reset! s/source before)))))

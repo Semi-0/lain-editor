@@ -38,21 +38,22 @@
      (if (= :visualizer (:view palette))
        (visualizer-settings vm target)
        [:div.palette-commands
-     [:input {:replicant/key :command-search :type "search"
-              :placeholder (if (= :sessions (:view palette)) "Search sessions…" "Type a command…")
-              :aria-label (if (= :sessions (:view palette)) "Search sessions" "Search commands") :value (:query palette)
-              :on {:input [[:palette/query [:event/target.value]]]
-                   :keydown [[:palette/key [:event/key]]]}}]
-     (if (seq visible-commands)
-       (into [:div.command-list]
-             (map-indexed
-              (fn [index command]
-                [:button {:replicant/key [(:action command) (:target command) (:archive command) (:session command)]
-                          :type "button" :class (when (= index (:active palette)) "command-active")
-                          :disabled (not (:enabled command))
-                          :on {:click [[:palette/close] [:workspace/command command]]}}
-                 (:label command)]) visible-commands))
-       [:div.command-list (if (= :sessions (:view palette))
-                            (if (seq (:commands palette)) "No matching sessions" "No detached sessions")
-                            "No matching commands")])])
+        [:input {:replicant/key :command-search :type "search"
+                 :placeholder (if (= :sessions (:view palette)) "Search sessions…" "Type a command…")
+                 :aria-label (if (= :sessions (:view palette)) "Search sessions" "Search commands") :value (:query palette)
+                 :on {:input [[:palette/query [:event/target.value]]]
+                      :keydown [[:palette/key [:event/key]]]}}]
+        (if (seq visible-commands)
+          (into [:div.command-list]
+                (map-indexed
+                 (fn [index command]
+                   [:button {:replicant/key [(:action command) (:target command) (:archive command) (:session command) (:extensionId command)]
+                             :type "button" :class (when (= index (:active palette)) "command-active")
+                             :disabled (not (:enabled command))
+                             :title (:disabled-reason command)
+                             :on {:click [[:palette/close] [:workspace/command command]]}}
+                    (:label command)]) visible-commands))
+          [:div.command-list (if (= :sessions (:view palette))
+                               (if (seq (:commands palette)) "No matching sessions" "No detached sessions")
+                               "No matching commands")])])
      [:div.palette-hint (if (= :visualizer (:view palette)) "Esc dismiss" "↑ ↓ select · Enter execute · Esc dismiss")]]))

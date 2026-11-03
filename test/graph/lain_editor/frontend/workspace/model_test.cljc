@@ -285,3 +285,13 @@
     (is (str/includes? (:extensionDraft reconciled) "first draft"))
     (is (str/includes? (:extensionDraft reconciled) "pending"))
     (is (= 1 (count (:extensionEdits reconciled))))))
+
+(deftest extension-editor-controls-survive-missing-runtime-metadata
+  (let [doc (model/update-pane (document) "a" assoc :extensions ["first" "second"])
+        commands (model/commands doc "a" {} false)
+        selected (filter #(contains? #{:close-extension-editor :reopen-extension-editor :remove-extension} (:action %)) commands)]
+    (is (= 6 (count selected)))
+    (is (= #{0 1} (set (map :extensionId selected))))
+    (is (every? :enabled (remove #(= :remove-extension (:action %)) selected)))
+    (is (not-any? :enabled (filter #(= :remove-extension (:action %)) selected)))
+    (is (every? :disabled-reason (filter #(= :remove-extension (:action %)) selected)))))
