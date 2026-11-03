@@ -148,8 +148,8 @@
           (.then (fn [owner]
                    (when-not (= generation (:generation owner))
                      (s/transact! #(do (s/change-pane! id model/reconcile-owner owner (get @s/applied-extensions id))
-                                      (remember-owner! id owner)
-                                      (s/refresh! id)))
+                                       (remember-owner! id owner)
+                                       (s/refresh! id)))
                      (throw (js/Error. "Session changed · current metadata refreshed; review before retrying")))))))
     (js/Promise.resolve nil)))
 
@@ -161,30 +161,30 @@
 (defn run!
   ([id op] (run! id op true))
   ([id op compiler-session?]
-  (let [pane (model/pane @s/workspace id)
-        extensions (model/extension-sources pane)
-        source (case op "run" (:source pane) "extend" (:extensionDraft pane)
-                     (throw (js/Error. "Unknown source operation")))]
-    (if (and (:development pane) (= op "run"))
-      (dispatch! [:development/commit id])
-      (operation!
-       id
-       #(-> (mutate! id {:op op :pane id :source source :compilerSession compiler-session?
-                         :extensions (if (= op "run") extensions []) :generation (get @s/generations id)})
-            (.then (fn [result]
-                     (s/transact! (fn []
-                      (s/change-pane! id
-                                      (fn [p]
-                                        (case op
-                                          "run" (model/committed-source p source extensions)
-                                          "extend" (model/extended-source p source)
-                                          (throw (js/Error. "Unknown source operation")))))
-                      (when-let [mode (:displayMode result)]
-                        (s/change-pane! id layers/program-output mode))
-                      (swap! s/errors dissoc id)
-                      (swap! s/expansions dissoc id)
-                      (remember-owner! id result)
-                      (reset! s/message "Runtime updated · session continues when views close")))))))))))
+   (let [pane (model/pane @s/workspace id)
+         extensions (model/extension-sources pane)
+         source (case op "run" (:source pane) "extend" (:extensionDraft pane)
+                      (throw (js/Error. "Unknown source operation")))]
+     (if (and (:development pane) (= op "run"))
+       (dispatch! [:development/commit id])
+       (operation!
+        id
+        #(-> (mutate! id {:op op :pane id :source source :compilerSession compiler-session?
+                          :extensions (if (= op "run") extensions []) :generation (get @s/generations id)})
+             (.then (fn [result]
+                      (s/transact! (fn []
+                                     (s/change-pane! id
+                                                     (fn [p]
+                                                       (case op
+                                                         "run" (model/committed-source p source extensions)
+                                                         "extend" (model/extended-source p source)
+                                                         (throw (js/Error. "Unknown source operation")))))
+                                     (when-let [mode (:displayMode result)]
+                                       (s/change-pane! id layers/program-output mode))
+                                     (swap! s/errors dissoc id)
+                                     (swap! s/expansions dissoc id)
+                                     (remember-owner! id result)
+                                     (reset! s/message "Runtime updated · session continues when views close")))))))))))
 
 (defn spawn-slots! [id]
   (operation!
@@ -193,19 +193,19 @@
         (.then (fn [_] (api! {:op "spawn-slot" :pane id :generation (get @s/generations id)})))
         (.then (fn [{:keys [source slots skipped generation displayMode] :as result}]
                  (s/transact! (fn []
-                  (when (seq slots)
-                    (s/change-pane! id model/extended-source source)
-                    (remember-owner! id result)
-                    (swap! s/expansions dissoc id))
-                  (when displayMode (s/change-pane! id layers/program-output displayMode))
-                  (swap! s/generations assoc id generation)
-                  (swap! s/errors dissoc id)
-                  (reset! s/message
-                          (str (if (seq slots)
-                                 (str "Spawned " (count slots) " callable slots · outputs remain unresolved")
-                                 "No undefined callable slots")
-                               (when (seq skipped)
-                                 (str " · " (count skipped) " scoped/computed slots cannot be filled from this block")))))))))))
+                                (when (seq slots)
+                                  (s/change-pane! id model/extended-source source)
+                                  (remember-owner! id result)
+                                  (swap! s/expansions dissoc id))
+                                (when displayMode (s/change-pane! id layers/program-output displayMode))
+                                (swap! s/generations assoc id generation)
+                                (swap! s/errors dissoc id)
+                                (reset! s/message
+                                        (str (if (seq slots)
+                                               (str "Spawned " (count slots) " callable slots · outputs remain unresolved")
+                                               "No undefined callable slots")
+                                             (when (seq skipped)
+                                               (str " · " (count skipped) " scoped/computed slots cannot be filled from this block")))))))))))
 
 (declare persist-reconnect!)
 
@@ -243,10 +243,10 @@
   (when-not @s/busy?
     (let [fresh (model/new-pane)]
       (s/transact! (fn []
-       (if axis
-         (swap! s/workspace model/split-pane id axis fresh)
-         (swap! s/workspace model/spawn-pane fresh))
-       (s/select-pane! (:id fresh))))
+                     (if axis
+                       (swap! s/workspace model/split-pane id axis fresh)
+                       (swap! s/workspace model/spawn-pane fresh))
+                     (s/select-pane! (:id fresh))))
       (dom/focus-pane! (:id fresh)))))
 
 (defn close-pane! [id]
@@ -255,10 +255,10 @@
                 #(-> (api! {:op "close" :pane id})
                      (.then (fn [_]
                               (s/transact! (fn []
-                               (reset! s/workspace next-document)
-                               (reset! s/selected-id (desktops/selected-id next-document))
-                               (doseq [cell [s/generations s/session-ids s/run-ids s/applied-extensions s/reconnect s/errors s/results s/expansions s/refreshes]]
-                                 (swap! cell dissoc id))))
+                                             (reset! s/workspace next-document)
+                                             (reset! s/selected-id (desktops/selected-id next-document))
+                                             (doseq [cell [s/generations s/session-ids s/run-ids s/applied-extensions s/reconnect s/errors s/results s/expansions s/refreshes]]
+                                               (swap! cell dissoc id))))
                               (reset! s/message "Block closed · remaining sessions preserved")
                               (dom/focus-pane! @s/selected-id)))))))
 
@@ -287,10 +287,10 @@
    #(-> (api! {:op "list-sessions"})
         (.then (fn [{:keys [sessions]}]
                  (reset! s/palette {:open? true :view :sessions
-                                   :heading (if (= :reopen-running action)
-                                              "Reopen running session" "Stop session")
-                                   :commands (model/session-commands sessions action)
-                                   :query "" :active 0}))))))
+                                    :heading (if (= :reopen-running action)
+                                               "Reopen running session" "Stop session")
+                                    :commands (model/session-commands sessions action)
+                                    :query "" :active 0}))))))
 
 (defn reopen-session! [session-id]
   (let [id (str (random-uuid))]
@@ -327,8 +327,8 @@
           desktop-id (:activeDesktop @s/workspace)
           next-document (model/reopen-closed-block @s/workspace archive-id desktop-id fresh-id)]
       (s/transact! (fn []
-       (reset! s/workspace next-document)
-       (s/select-pane! fresh-id)))
+                     (reset! s/workspace next-document)
+                     (s/select-pane! fresh-id)))
       (reset! s/message "Closed block reopened · not run")
       (dom/focus-pane! fresh-id))))
 
@@ -436,7 +436,7 @@
 (defn open-server-browser! [kind]
   (when (connected?)
     (swap! s/ui assoc :file-browser {:id (str (random-uuid)) :kind kind :path "" :directory ""
-                                    :query "" :entries [] :loading? true})
+                                     :query "" :entries [] :loading? true})
     (browse-server! "")))
 
 (defn- open-source-document! [{:keys [path source]}]
@@ -444,8 +444,8 @@
   (let [id (str (random-uuid))
         pane (model/loaded-source (model/new-pane id) path source)]
     (s/transact! #(do (swap! s/workspace model/spawn-pane pane)
-                     (s/select-pane! id)
-                     (reset! s/message (str "Opened " path " from server workspace · not run"))))
+                      (s/select-pane! id)
+                      (reset! s/message (str "Opened " path " from server workspace · not run"))))
     (dom/focus-pane! id)))
 
 (defn open-server-path! [path]
@@ -546,8 +546,8 @@
     (case action
       :new-workspace (restore! (model/initial-workspace) {:workspace-path nil})
       :new-desktop (s/transact! (fn []
-                     (swap! s/workspace desktops/add-desktop (str (random-uuid)) (model/new-pane))
-                     (reset! s/selected-id (desktops/selected-id @s/workspace))))
+                                  (swap! s/workspace desktops/add-desktop (str (random-uuid)) (model/new-pane))
+                                  (reset! s/selected-id (desktops/selected-id @s/workspace))))
       :switch-desktop (s/switch-desktop! target)
       :run (run! target "run")
       :run-legacy (run! target "run" false)

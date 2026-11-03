@@ -92,8 +92,8 @@
                  (when-not @scheduled
                    (reset! scheduled (js/requestAnimationFrame draw!)))))
     (rx/own! owner #(do (reset! alive? false)
-                       (when @scheduled (js/cancelAnimationFrame @scheduled))
-                       (r/unmount root)))))
+                        (when @scheduled (js/cancelAnimationFrame @scheduled))
+                        (r/unmount root)))))
 
 (defn- pane-processes! [owner]
   (let [panes (atom {})
@@ -131,7 +131,7 @@
     (pane-processes! owner)
     (renderer! owner root)
     (let [timer (js/setInterval #(when (and (effects/connected?) (not @s/busy?) (not (.-hidden js/document)))
-                                  (swap! s/tick inc)) 2000)]
+                                   (swap! s/tick inc)) 2000)]
       (rx/own! owner #(js/clearInterval timer)))
     (dom/listen! owner js/window "beforeunload" dispose!)))
 

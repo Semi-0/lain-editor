@@ -44,8 +44,8 @@
   (-> document
       (update :panes conj fresh)
       (update-in (desktops/layout-path document) replace-leaf id
-              {:type "split" :axis axis :ratio 0.5
-               :first {:type "pane" :id id} :second {:type "pane" :id (:id fresh)}})))
+                 {:type "split" :axis axis :ratio 0.5
+                  :first {:type "pane" :id id} :second {:type "pane" :id (:id fresh)}})))
 
 (defn spawn-pane [document fresh]
   (workspace/ensure! (not (pane document (:id fresh))) "Duplicate pane id")
@@ -283,35 +283,35 @@
   ([document id generations busy?] (commands document id generations busy? nil))
   ([document id generations busy? applied]
    (let [p (pane document id)]
-    (into
-     (mapv (fn [[action label]]
-             {:action action :label (if (and (= action :toggle-auto-refresh) (= false (:autoRefresh p)))
-                                      "Resume automatic refresh" label) :target id
-              :enabled (and (not busy?) (some? p)
-                            (case action
-                              :load (< (count (:panes document)) 64)
-                              :detach-session (and (contains? generations id)
-                                                   (some? (:executedSource p)))
-                              :reopen-session (< (count (:panes document)) 64)
-                              :close (and (> (count (desktops/pane-ids document)) 1)
-                                          (< (count (get document :closedBlocks []))
-                                             workspace/archive-capacity))
-                              :spawn-slot (and (contains? generations id)
-                                               (not (:development p))
-                                               (= (:source p) (:executedSource p))
-                                               (not (extensions-edited? p))
-                                               (str/blank? (:extensionDraft p)))
-                              :extend (and (contains? generations id)
-                                           (not (extensions-edited? p))
-                                           (not (str/blank? (:extensionDraft p))))
-                              true))})
-           command-specs)
-     (concat (map (fn [entry]
-            {:action :reopen-closed :archive (:id entry) :target id
-             :label (closed-block-label entry)
-             :enabled (and (not busy?) (< (count (:panes document)) 64))})
-          (reverse (get document :closedBlocks [])))
-     (extension-commands id applied generations busy?))))))
+     (into
+      (mapv (fn [[action label]]
+              {:action action :label (if (and (= action :toggle-auto-refresh) (= false (:autoRefresh p)))
+                                       "Resume automatic refresh" label) :target id
+               :enabled (and (not busy?) (some? p)
+                             (case action
+                               :load (< (count (:panes document)) 64)
+                               :detach-session (and (contains? generations id)
+                                                    (some? (:executedSource p)))
+                               :reopen-session (< (count (:panes document)) 64)
+                               :close (and (> (count (desktops/pane-ids document)) 1)
+                                           (< (count (get document :closedBlocks []))
+                                              workspace/archive-capacity))
+                               :spawn-slot (and (contains? generations id)
+                                                (not (:development p))
+                                                (= (:source p) (:executedSource p))
+                                                (not (extensions-edited? p))
+                                                (str/blank? (:extensionDraft p)))
+                               :extend (and (contains? generations id)
+                                            (not (extensions-edited? p))
+                                            (not (str/blank? (:extensionDraft p))))
+                               true))})
+            command-specs)
+      (concat (map (fn [entry]
+                     {:action :reopen-closed :archive (:id entry) :target id
+                      :label (closed-block-label entry)
+                      :enabled (and (not busy?) (< (count (:panes document)) 64))})
+                   (reverse (get document :closedBlocks [])))
+              (extension-commands id applied generations busy?))))))
 
 (defn desktop-commands [document busy?]
   (into [{:action :new-desktop :label "New desktop" :enabled (and (not busy?) (< (count (:panes document)) 64))}]

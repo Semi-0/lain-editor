@@ -34,10 +34,10 @@
                                           (get @s/applied-extensions target))
                           (model/desktop-commands @s/workspace @s/busy?)))]
     (or (some #(when (and (= action (:action %))
-                         (= archive (:archive %))
-                         (= session (:session %))
-                         (= extensionId (:extensionId %))
-                         (= target (or (:target %) target))) %) available)
+                          (= archive (:archive %))
+                          (= session (:session %))
+                          (= extensionId (:extensionId %))
+                          (= target (or (:target %) target))) %) available)
         (throw (ex-info "Unsupported editor command" {:command command})))))
 
 (defn- perform! [command]

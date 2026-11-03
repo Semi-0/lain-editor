@@ -155,7 +155,7 @@
 
 (deftest document-preserves-drafts-and-successful-history
   (let [doc (model/update-pane (document) "a" assoc :source "draft" :executedSource "(define result 1)"
-                                :extensions ["(define next (+ result 1))"] :extensionDraft "future")]
+                               :extensions ["(define next (+ result 1))"] :extensionDraft "future")]
     (is (= doc (workspace/validate doc)))
     (is (= "draft" (:source (model/pane doc "a")))))
   (is (thrown? #?(:clj Exception :cljs js/Error)
@@ -224,9 +224,9 @@
     (is (= "(define x 1)\n" (model/block-source (assoc (model/new-pane "b") :source "(define x 1)\n"))))
     (is (= "" (model/block-source (model/new-pane "b"))))
     (is (= "a" (:target (first (model/matching-commands (model/commands (document) "a" {} false)
-                                                       "save file")))))
+                                                        "save file")))))
     (is (:enabled (first (model/matching-commands (model/commands (document) "a" {} false)
-                                                 "save file"))))))
+                                                  "save file"))))))
 
 (deftest manual-refresh-is-a-portable-per-block-preference
   (let [doc (document)
