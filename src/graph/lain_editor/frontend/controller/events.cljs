@@ -6,6 +6,7 @@
             [graph.lain-editor.frontend.workspace.desktops :as desktops]
             [graph.lain-editor.frontend.workspace.effects :as effects]
             [graph.lain-editor.frontend.workspace.remote-files :as remote-files]
+            [graph.lain-editor.frontend.workspace.file-links :as file-links]
             [graph.lain-editor.frontend.development.dataflow :as development]
             [graph.lain-editor.frontend.development.model :as development-model]
             [graph.lain-editor.development.protocol :as protocol]
@@ -85,6 +86,8 @@
    (when-not (and (vector? event) (keyword? kind))
      (throw (ex-info "Invalid declarative event" {:event event})))
    (case kind
+     :file-links/keep-editor (file-links/resolve! a :editor)
+     :file-links/use-file (file-links/resolve! a :file)
      :workspace/select (s/select-pane! a)
      :workspace/edit-source (s/change-pane! a assoc :source b)
      :workspace/edit-extension (s/change-pane! a model/edit-extension b c)
@@ -184,4 +187,5 @@
     (attach-storage! scope)
     (catch :default error (reset! s/message (str "Local draft storage: " (.-message error)))))
   (remote-files/attach! scope)
+  (file-links/attach! scope effects/api! effects/lifecycle-token effects/current-lifecycle?)
   (rx/own! scope #(do (effects/dispose!) (effects/set-dispatch! nil))))

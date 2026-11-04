@@ -36,6 +36,15 @@
     [:div.source-area
      [:div.source-meta {:hidden (str/blank? (:filename pane))}
       [:span (:filename pane)]]
+     (when-let [external (get-in vm [:file-links id :external])]
+       [:aside.file-conflict {:role "alert"}
+        [:p "This file changed outside the editor. Both versions are preserved."]
+        [:details [:summary "View file version"]
+         [:textarea {:aria-label "External file version" :readonly true :value (or (:source external) "File deleted")}]]
+        [:button {:type "button" :disabled (:busy? vm) :on {:click [[:file-links/keep-editor id]]}}
+         "Keep editor version; preserve file copy"]
+        [:button {:type "button" :disabled (:busy? vm) :on {:click [[:file-links/use-file id]]}}
+         "Use file version; preserve editor copy"]])
      [:textarea.code
       {:replicant/key [id :source] :aria-label (str "Lain code " (inc index))
        :spellcheck "false" :autocorrect "off" :autocapitalize "off"

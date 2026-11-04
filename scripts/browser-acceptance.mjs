@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import net from 'node:net';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -38,6 +39,8 @@ const requiredChecks = [
   'recorded learning replay scrubs and inspects frozen values',
   'fold cell selection survives a desktop remount',
   'server workspace opens drafts and downloads local copies',
+  'file watcher preserves conflicts and Run saves before execution',
+  'socket file and primitive bridges preserve editor drafts and existing owners',
   'no browser errors were reported',
 ];
 const report = { url, startedAt: new Date().toISOString(), requiredChecks, checks: [], pageErrors: [], consoleErrors: [], passed: false };
@@ -83,6 +86,17 @@ async function probeFullscreenEscape(browser) {
   }
 }
 
+let savedRunCount = 0;
+async function saveBeforeRun(force = false) {
+  const dialog = page.getByRole('dialog', { name: 'Save before Run', exact: true });
+  if (force || await dialog.isVisible()) {
+    await dialog.getByRole('textbox', { name: 'Workspace-relative file path' }).fill(`browser-acceptance/run-${++savedRunCount}.lain`);
+    await dialog.getByRole('checkbox').check();
+    await dialog.getByRole('button', { name: 'Save file', exact: true }).click();
+    await dialog.waitFor({ state: 'hidden' });
+  }
+}
+
 async function paletteCommand(label) {
   await page.keyboard.press('Control+k');
   const palette = page.locator('dialog.command-palette');
@@ -90,6 +104,7 @@ async function paletteCommand(label) {
   await palette.getByRole('searchbox', { name: 'Search commands' }).fill(label);
   await palette.getByRole('button', { name: label, exact: true }).click();
   await palette.waitFor({ state: 'hidden' });
+  if (label === 'Run block') await saveBeforeRun();
 }
 
 async function visualizerSettings() {
@@ -111,6 +126,12 @@ try {
   page.on('response', response => {
     if (new URL(response.url()).pathname === '/api' && response.request().method() === 'POST') {
       const command = response.request().postDataJSON();
+      if (response.status() >= 400) {
+        response.json().then(body => {
+          (report.httpErrors ??= []).push({ op: command.op, status: response.status(), error: body.error });
+          console.error('API ERROR', command.op, JSON.stringify(body.error));
+        }).catch(() => {});
+      }
       if (['run', 'open-session'].includes(command.op)) {
         ownerResponses.push(response.json().then(body => {
           if (body.ok && body.result.sessionId) temporaryOwners.add(body.result.sessionId);
@@ -207,6 +228,7 @@ try {
       return incoming.request().postDataJSON().op === 'run';
     });
     await code.press('Control+Enter');
+    await saveBeforeRun(true);
     const result = await response;
     assert.equal(result.ok(), true);
     const body = await result.json();
@@ -394,7 +416,7 @@ try {
     const observe = request => {
       if (request.method() === 'POST' && new URL(request.url()).pathname === '/api') {
         const command = request.postDataJSON();
-        if (command.op === 'save-block' || command.op === 'save-workspace') {
+        if (command.op === 'save-block' || command.op === 'save-workspace' || command.op === 'files/write') {
           writes.push(command);
         }
       }
@@ -720,6 +742,119 @@ try {
     assert.equal(exported.suggestedFilename(), 'layout.json');
     assert.equal(JSON.parse(await readFile(await exported.path(), 'utf8')).format, 'lain-tiled-editor');
     assert.deepEqual(await api({ op: 'list-sessions' }), before);
+  });
+  await check('file watcher preserves conflicts and Run saves before execution', async () => {
+    const api = async command => {
+      const response = await context.request.post(new URL('/api', url).href, { headers: { Origin: new URL(url).origin }, data: command });
+      const body = await response.json(); assert.equal(body.ok, true, body.error); return body.result;
+    };
+    const path = `browser-acceptance/watched-${Date.now()}.lain`;
+    let file = await api({ op: 'files/write', path, source: '(define watched 1) (define result watched)' });
+    const owners = await api({ op: 'list-sessions' });
+    const mutations = [];
+    const observe = request => {
+      if (request.method() === 'POST' && new URL(request.url()).pathname === '/api') {
+        const command = request.postDataJSON();
+        if (['run', 'extend', 'open-session', 'files/write'].includes(command.op)) mutations.push(command);
+      }
+    };
+    page.on('request', observe);
+    await paletteCommand('Open file…');
+    const picker = page.getByRole('dialog', { name: 'Open file', exact: true });
+    await picker.getByRole('textbox', { name: 'Server workspace directory' }).fill('browser-acceptance');
+    await picker.getByRole('button', { name: 'Go', exact: true }).click();
+    await picker.getByRole('button', { name: `Open ${path.split('/').at(-1)}`, exact: true }).click();
+    await picker.waitFor({ state: 'hidden' });
+    const selected = page.locator('.pane.selected textarea.code').first();
+    await selected.waitFor();
+    await page.waitForTimeout(1100);
+    file = await api({ op: 'files/write', path, source: '(define watched 2) (define result watched)', baseVersion: file.version });
+    await page.waitForFunction(() => document.querySelector('.pane.selected textarea.code')?.value === '(define watched 2) (define result watched)');
+    assert.deepEqual(await api({ op: 'list-sessions' }), owners, 'watching must not create or restart owners');
+    await selected.fill('(define watched 7) (define result watched)');
+    file = await api({ op: 'files/write', path, source: '(define watched 3) (define result watched)', baseVersion: file.version });
+    const conflict = page.locator('.pane.selected .file-conflict');
+    await conflict.waitFor({ state: 'visible' });
+    assert.equal(await selected.inputValue(), '(define watched 7) (define result watched)');
+    await conflict.getByRole('button', { name: 'Keep editor version; preserve file copy', exact: true }).click();
+    await conflict.waitFor({ state: 'hidden' });
+    assert.ok((await page.locator('.pane textarea.code').evaluateAll(nodes => nodes.map(node => node.value))).includes('(define watched 3) (define result watched)'));
+    assert.equal(await selected.inputValue(), '(define watched 7) (define result watched)');
+    assert.deepEqual(mutations, [], 'external changes and conflict resolution must not execute or save');
+    const response = page.waitForResponse(r => new URL(r.url()).pathname === '/api' && r.request().method() === 'POST' && r.request().postDataJSON().op === 'run');
+    await selected.press('Control+Enter');
+    const ran = await (await response).json(); assert.equal(ran.ok, true, ran.error);
+    assert.deepEqual(mutations.map(command => command.op), ['files/write', 'run']);
+    assert.equal((await api({ op: 'files/read', path })).source, '(define watched 7) (define result watched)');
+    assert.equal(ran.result.source, '(define watched 7) (define result watched)');
+    page.off('request', observe);
+    report.fileSync = { path, runId: ran.result.runId, sessionId: ran.result.sessionId, generation: ran.result.generation, pane: await selected.evaluate(element => element.closest('.pane').dataset.paneId) };
+  });
+  await check('socket file and primitive bridges preserve editor drafts and existing owners', async () => {
+    assert.ok(process.env.LAIN_EDITOR_SOCKET, 'Set LAIN_EDITOR_SOCKET for the independent local socket acceptance');
+    const rpc = command => new Promise((resolve, reject) => {
+      const client = net.createConnection(process.env.LAIN_EDITOR_SOCKET);
+      let text = '';
+      client.setTimeout(timeout, () => { client.destroy(); reject(new Error('Socket request timed out')); });
+      client.on('error', reject);
+      client.on('connect', () => client.write(JSON.stringify(command) + '\n'));
+      client.on('data', chunk => {
+        text += chunk;
+        if (text.includes('\n')) {
+          client.end();
+          try { resolve(JSON.parse(text.slice(0, text.indexOf('\n')))); } catch (error) { reject(error); }
+        }
+      });
+    });
+    const call = async command => { const body = await rpc(command); assert.equal(body.ok, true, JSON.stringify(body.error)); return body.result; };
+    const api = async command => {
+      const response = await context.request.post(new URL('/api', url).href, { headers: { Origin: new URL(url).origin }, data: command });
+      const body = await response.json(); assert.equal(body.ok, true, body.error); return body.result;
+    };
+    const identity = report.fileSync;
+    const before = await api({ op: 'list-sessions' });
+    assert.equal((await rpc({ op: 'open-session', source: 'must not run' })).ok, false);
+    let workspace;
+    for (let attempt = 0; attempt < 50 && !workspace; attempt++) {
+      const listed = await call({ op: 'editor/list' });
+      workspace = listed.workspaces.find(item => item.panes.some(pane => pane.id === identity.pane && pane.generation === identity.generation));
+      if (!workspace) await page.waitForTimeout(100);
+    }
+    assert.ok(workspace, 'Editor snapshot must report the running pane and generation');
+    const selected = page.locator('.pane.selected textarea.code').first();
+    await selected.fill('(define watched 99) (define result watched)');
+    await paletteCommand('Toggle extension editor');
+    await page.getByRole('textbox', { name: 'Extension code', exact: true }).fill('(define pending 100)');
+    const extend = async command => {
+      const queued = await call({ ...command, workspace: workspace.workspace, pane: identity.pane });
+      for (let attempt = 0; attempt < 100; attempt++) {
+        const receipt = await call({ op: 'editor/status', workspace: workspace.workspace, request: queued.request });
+        if (receipt.status === 'failed') assert.fail(receipt.error);
+        if (receipt.status === 'applied') return receipt.result;
+        await page.waitForTimeout(100);
+      }
+      assert.fail('Editor command acknowledgement timed out');
+    };
+    const path = `browser-acceptance/socket-extension-${Date.now()}.lain`;
+    const sourceFile = await call({ op: 'files/write', path, source: '(define socket-added (+ watched 1))' });
+    const extended = await extend({ op: 'editor/extend-file', generation: identity.generation, path, version: sourceFile.version });
+    assert.equal(extended.sessionId, identity.sessionId); assert.equal(extended.runId, identity.runId);
+    const suffix = `${Date.now()}`;
+    const namespace = `browser-acceptance.bridge-native-${suffix}`;
+    const nativePath = `browser_acceptance/bridge_native_${suffix}.clj`;
+    const nativeSource = `(ns ${namespace} (:require [propagators.compiler-2.compiler.basis :as basis]))\n(defn bindings [] [['triple (basis/primitive-operator (fn [x] (* 3 x)))]])`;
+    const native = await call({ op: 'files/write', path: nativePath, source: nativeSource });
+    const primitive = await extend({ op: 'editor/extend-primitives', generation: extended.generation,
+                                    path: nativePath, version: native.version, entry: `${namespace}/bindings`, revision: 0 });
+    const result = await extend({ op: 'editor/extend-code', generation: primitive.generation, source: '(define socket-result (triple socket-added))' });
+    const inspected = await api({ op: 'inspect', sessionId: identity.sessionId, generation: result.generation,
+                                  display: { cell: 'socket-result', mode: 'value' } });
+    assert.equal(inspected.value, '24', 'Extensions must use the committed watched=7, preserving the watched=99 draft');
+    assert.equal(await selected.inputValue(), '(define watched 99) (define result watched)');
+    assert.equal(await page.getByRole('textbox', { name: 'Extension code', exact: true }).inputValue(), '(define pending 100)');
+    assert.equal((await call({ op: 'files/read', path: identity.path })).source, '(define watched 7) (define result watched)');
+    assert.equal((await api({ op: 'list-sessions' })).sessions.length, before.sessions.length);
+    report.socketBridge = { sessionId: result.sessionId, runId: result.runId, generation: result.generation, value: inspected.value };
   });
   await check('no browser errors were reported', async () => {
     assert.deepEqual(report.pageErrors, []);

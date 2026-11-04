@@ -5,6 +5,7 @@
             [graph.lain-editor.frontend.ui.dom :as dom]
             [graph.lain-editor.frontend.workspace.desktops :as desktops]
             [graph.lain-editor.frontend.workspace.model :as model]
+            [graph.lain-editor.frontend.workspace.file-links :as file-links]
             [graph.lain-editor.frontend.workspace.source-save :as source-save]
             [graph.lain-editor.frontend.workspace.state :as s]
             [graph.lain-editor.workspace.model :as workspace]
@@ -158,9 +159,10 @@
     (-> (reconcile-before! id) (.then (fn [_] (api! command))))
     (api! command)))
 
-(defn run!
-  ([id op] (run! id op true))
-  ([id op compiler-session?]
+(defn- run-committed!
+  ([id op] (run-committed! id op true))
+  ([id op compiler-session?] (run-committed! id op compiler-session? nil))
+  ([id op compiler-session? saved]
    (let [pane (model/pane @s/workspace id)
          extensions (model/extension-sources pane)
          source (case op "run" (:source pane) "extend" (:extensionDraft pane)
@@ -170,7 +172,8 @@
        (operation!
         id
         #(-> (mutate! id {:op op :pane id :source source :compilerSession compiler-session?
-                          :extensions (if (= op "run") extensions []) :generation (get @s/generations id)})
+                          :extensions (if (= op "run") extensions []) :generation (get @s/generations id)
+                          :savedFile (when saved (select-keys saved [:path :version]))})
              (.then (fn [result]
                       (s/transact! (fn []
                                      (s/change-pane! id
@@ -185,6 +188,75 @@
                                      (swap! s/expansions dissoc id)
                                      (remember-owner! id result)
                                      (reset! s/message "Runtime updated · session continues when views close")))))))))))
+
+(defn- saved-main! [id source]
+  (let [link (get-in @s/ui [:file-links id])
+        save! (fn [path version]
+                (-> (api! {:op "files/write" :path path :source source :baseVersion version})
+                    (.then (fn [snapshot]
+                             (when-not (= source (:source snapshot))
+                               (throw (js/Error. "File changed while saving; review both versions before Run")))
+                             (file-links/register! id snapshot)
+                             (s/change-pane! id assoc :filename path)
+                             snapshot))))]
+    (cond
+      (:external link) (js/Promise.reject (js/Error. "Resolve the file conflict before Run; both versions are preserved"))
+      link (save! (:path link) (:version link))
+      :else
+      (js/Promise.
+       (fn [resolve reject]
+         (source-save/open!
+          (model/block-filename (model/pane @s/workspace id))
+          (fn [path replace?]
+            (-> (if replace? (api! {:op "files/read" :path path}) (js/Promise.resolve {:version nil}))
+                (.then (fn [existing] (save! path (:version existing))))
+                (.then (fn [snapshot] (resolve snapshot) snapshot))))
+          nil
+          {:aria-label "Save before Run" :title "Save main source before Run"
+           :description "Choose its server workspace file. Execution starts only after saving succeeds. Extension files stay separate."
+           :cancel! #(reject (cancelled-error))}))))))
+
+(defn run!
+  ([id op] (run! id op true))
+  ([id op compiler-session?]
+   (when (and (not @s/busy?) (connected?))
+     (if (= op "run")
+       (let [pane (model/pane @s/workspace id)
+             source (:source pane) extensions (model/extension-sources pane)
+             epoch (lifecycle-token)]
+         (-> (saved-main! id source)
+             (.then (fn [snapshot]
+                      (when-not (current-lifecycle? epoch) (throw (cancelled-error)))
+                      (let [current (model/pane @s/workspace id)]
+                        (when-not (and (= source (:source current)) (= extensions (model/extension-sources current)))
+                          (throw (js/Error. "Editor changed while saving; review it and Run again")))
+                        (run-committed! id op compiler-session? snapshot))))
+             (.catch (fn [error]
+                       (when-not (cancelled? error)
+                         (reset! s/message (str "Run stopped: " (.-message error))))))))
+       (run-committed! id op compiler-session?)))))
+
+(defn extend-external! [{:keys [pane generation action source path version entry revision]}]
+  (if-not (and (model/pane @s/workspace pane) generation (= generation (get @s/generations pane)))
+    (js/Promise.reject (js/Error. "Pane changed or has no live session; inspect before extending"))
+    (-> (operation!
+         pane
+         #(-> (api! (if (= action "extend-code")
+                      {:op "extend" :pane pane :generation generation :source source}
+                      {:op "extend-from-file" :pane pane :generation generation :path path
+                       :version version :entry entry :revision revision}))
+              (.then (fn [result]
+                       (s/transact!
+                        (fn []
+                          (s/change-pane! pane model/reconcile-owner result (get @s/applied-extensions pane))
+                          (remember-owner! pane result)
+                          (swap! s/errors dissoc pane)
+                          (swap! s/expansions dissoc pane)
+                          (s/refresh! pane)
+                          (reset! s/message "Socket API extended the existing session")))
+                       result))))
+        (.then (fn [result]
+                 (or result (throw (js/Error. (or (get @s/errors pane) "Extension was not applied")))))))))
 
 (defn spawn-slots! [id]
   (operation!
@@ -217,6 +289,7 @@
       nil
       #(-> (api! {:op "restore" :workspace document :reconnect (or (:reconnect options) {})})
            (.then (fn [result]
+                    (when-not (contains? options :reconnect) (file-links/clear!))
                     (s/transact!
                      (fn []
                        (doseq [cell [s/results s/errors s/expansions s/session-ids s/run-ids
@@ -407,12 +480,24 @@
      (let [pane (model/pane @s/workspace id)]
        (if (str/ends-with? (:filename pane) ".lain") (:filename pane) (model/block-filename pane)))
      (fn [path replace?]
-       (let [pane (model/pane @s/workspace id)]
-         (-> (api! {:op "save-block" :pane id :path path :replace replace? :source (model/block-source pane)})
-             (.then (fn [result]
-                      (s/change-pane! id assoc :filename (:path result))
-                      (reset! s/message (str "File saved in server workspace: " (:path result)))
-                      result))))))))
+       (let [source (:source (model/pane @s/workspace id))
+             link (get-in @s/ui [:file-links id])
+             same-file? (= path (:path link))]
+         (when (and same-file? (:external link))
+           (throw (js/Error. "Resolve the file conflict first; both versions are preserved")))
+         (-> (cond
+               same-file? (js/Promise.resolve link)
+               replace? (api! {:op "files/read" :path path})
+               :else (js/Promise.resolve {:version nil}))
+             (.then (fn [baseline]
+                      (api! {:op "files/write" :path path :baseVersion (:version baseline) :source source})))
+             (.then (fn [snapshot]
+                      (when-not (= source (:source snapshot))
+                        (throw (js/Error. "File changed while saving; both versions remain available for review")))
+                      (s/change-pane! id assoc :filename path)
+                      (file-links/register! id snapshot)
+                      (reset! s/message (str "Main source saved in server workspace: " path))
+                      snapshot))))))))
 
 (defn close-server-browser! []
   (swap! s/ui dissoc :file-browser))
@@ -439,13 +524,17 @@
                                      :query "" :entries [] :loading? true})
     (browse-server! "")))
 
-(defn- open-source-document! [{:keys [path source]}]
+(defn- open-source-document! [{:keys [path source] :as document}]
   (when (>= (count (:panes @s/workspace)) 64) (throw (js/Error. "Workspace has 64 panes")))
   (let [id (str (random-uuid))
         pane (model/loaded-source (model/new-pane id) path source)]
     (s/transact! #(do (swap! s/workspace model/spawn-pane pane)
                       (s/select-pane! id)
                       (reset! s/message (str "Opened " path " from server workspace · not run"))))
+    (-> (api! {:op "files/watch" :path path})
+        (.then (fn [snapshot]
+                 (when (= source (:source snapshot)) (file-links/register! id snapshot))))
+        (.catch (fn [error] (reset! s/message (str "File watcher: " (.-message error))))))
     (dom/focus-pane! id)))
 
 (defn open-server-path! [path]

@@ -7,7 +7,9 @@ Application files and examples mentioned below live in the configured backend pr
 - **Cmd/Ctrl+K** or right-click opens the command palette for the selected block.
   Search commands and press Enter, use the arrow keys, or click a command.
   Escape or clicking outside dismisses it without changing the block.
-- **Cmd/Ctrl+Enter** runs the selected block. Run prepares a complete replacement;
+- **Cmd/Ctrl+Enter** saves the main source, then runs the selected block. A new
+  block asks for a server workspace path first. Canceling or a save conflict stops
+  Run. Run prepares a complete replacement;
   a failed compilation keeps the previous running program. Parse and compiler
   errors from the base source, edited applied extensions, or a new extension are
   shown in the bottom status bar for the selected block. Another block's success
@@ -17,10 +19,14 @@ Application files and examples mentioned below live in the configured backend pr
   workspace, starting at its root. Opening creates a new draft block and does not
   run code. Use Directory, Up, and Filter files to navigate. **Upload file…** is
   optional: it saves a server copy before opening it.
-- **Save file…**, or **Cmd/Ctrl+S**, saves current source, edited applied extensions
-  and the pending extension draft as a `.lain` file in the server workspace.
-  Paths are workspace-relative; missing directories are created. Existing files
-  require **Replace existing file**. Saving does not run code. Paths outside the
+- File-backed blocks refresh when another tool changes the server file. External
+  changes never execute code. If the editor has unsaved changes, both versions are
+  shown; either resolution keeps the other version in a separate block. Resolve
+  the conflict before Run.
+- **Save file…**, or **Cmd/Ctrl+S**, saves the main source in the server workspace.
+  Extension editors remain separate; Download file includes their source.
+  Paths are workspace-relative; missing directories are created. Choosing a
+  different existing file requires **Replace existing file**. Saving does not run code. Paths outside the
   workspace and paths through symbolic links are rejected.
 - **Download file** and **Download workspace** create local browser downloads.
   They also work while the remote connection is paused.

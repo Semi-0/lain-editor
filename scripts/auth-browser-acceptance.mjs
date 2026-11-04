@@ -29,7 +29,7 @@ try {
         expired = true;
         await route.fulfill({ status: 401, body: 'Session expired' });
       } else {
-        await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true, result: {} }) });
+        await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true, result: command.op === 'files/write' ? { path: command.path, source: command.source, version: 'saved', exists: true } : {} }) });
       }
     });
     await page.route('**/auth/session', async route => {
@@ -50,6 +50,9 @@ try {
     await editor.fill('(define draft 123)');
     if (trigger === 'run') {
       await editor.press('Control+Enter');
+      const save = page.getByRole('dialog', { name: 'Save before Run', exact: true });
+      await save.getByRole('textbox', { name: 'Workspace-relative file path' }).fill('auth-draft.lain');
+      await save.getByRole('button', { name: 'Save file', exact: true }).click();
     } else {
       expirePoll = true;
     }

@@ -3,13 +3,19 @@
   (:require [graph.lain-editor.frontend.workspace.state :as s]))
 
 (defonce operations (atom {}))
+(defonce cancellations (atom {}))
 
 (defn- current? [id] (= id (get-in @s/ui [:save-dialog :id])))
 
-(defn close! []
-  (when-let [id (get-in @s/ui [:save-dialog :id])]
-    (swap! operations dissoc id)
-    (swap! s/ui dissoc :save-dialog)))
+(defn close!
+  ([] (close! true))
+  ([cancel?]
+   (when-let [id (get-in @s/ui [:save-dialog :id])]
+     (let [cancel! (get @cancellations id)]
+       (swap! operations dissoc id)
+       (swap! cancellations dissoc id)
+       (swap! s/ui dissoc :save-dialog)
+       (when (and cancel? cancel!) (cancel!))))))
 
 (defn open!
   ([path save!] (open! path save! nil {}))
@@ -18,11 +24,12 @@
    (close!)
    (let [id (str (random-uuid))]
      (swap! operations assoc id save!)
+     (when-let [cancel! (:cancel! options)] (swap! cancellations assoc id cancel!))
      (swap! s/ui assoc :save-dialog
             (merge {:id id :path path :replace? false :saving? false :error nil
                     :aria-label "Save file" :title "Save file"
-                    :description "Save inside the server workspace. Includes current code, edited extensions and the pending draft."}
-                   options))
+                    :description "Save inside the server workspace. Saves the main block source; extension files stay separate."}
+                   (dissoc options :cancel!)))
      id)))
 
 (defn dispatch! [[action & args :as event]]
@@ -38,7 +45,7 @@
             (swap! s/ui update :save-dialog assoc :saving? true :error nil)
             (-> (js/Promise.resolve nil)
                 (.then #(save! path replace?))
-                (.then #(when (current? id) (close!)))
+                (.then #(when (current? id) (close! false)))
                 (.catch (fn [error]
                           (when (current? id)
                             (swap! s/ui update :save-dialog assoc :saving? false :error (.-message error)))))))

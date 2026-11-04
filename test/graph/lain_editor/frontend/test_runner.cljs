@@ -16,11 +16,11 @@
             [graph.lain-editor.frontend.workspace.model-test]
             [graph.lain-editor.frontend.workspace.remote-files-test]
             [graph.lain-editor.frontend.workspace.source-save-test]
+            [graph.lain-editor.frontend.workspace.file-links-test]
             [graph.lain-editor.frontend.workspace.status-error-test]
             [graph.lain-editor.frontend.workspace.auth-test]
             [graph.lain-editor.layout.node-clearance-test]
-            [graph.lain-editor.workspace.layers-test]
-))
+            [graph.lain-editor.workspace.layers-test]))
 
 (defonce completed? (atom false))
 
@@ -43,6 +43,6 @@
            (when-not @completed?
              (js/console.error "Test run did not complete")
              (set! (.-exitCode js/process) 1))))
-  (run-tests 'graph.lain-editor.frontend.workspace.auth-test 'graph.lain-editor.frontend.model.workspace-test 'graph.lain-editor.frontend.topology.controller-test 'graph.lain-editor.frontend.topology.graph-motion-test 'graph.lain-editor.frontend.topology.layout-controls-test 'graph.lain-editor.frontend.topology.replay-model-test 'graph.lain-editor.frontend.topology.stack-scene-model-test 'graph.lain-editor.frontend.ui.fullscreen-test 'graph.lain-editor.frontend.ui.reactive-test 'graph.lain-editor.frontend.values.value-folding-test 'graph.lain-editor.frontend.view.workspace-test 'graph.lain-editor.frontend.workspace.block-display-test 'graph.lain-editor.frontend.workspace.controller-test 'graph.lain-editor.frontend.workspace.desktop-test 'graph.lain-editor.frontend.workspace.model-test 'graph.lain-editor.frontend.workspace.remote-files-test 'graph.lain-editor.frontend.workspace.source-save-test 'graph.lain-editor.frontend.workspace.status-error-test 'graph.lain-editor.layout.node-clearance-test 'graph.lain-editor.workspace.layers-test))
+  (run-tests 'graph.lain-editor.frontend.workspace.auth-test 'graph.lain-editor.frontend.model.workspace-test 'graph.lain-editor.frontend.topology.controller-test 'graph.lain-editor.frontend.topology.graph-motion-test 'graph.lain-editor.frontend.topology.layout-controls-test 'graph.lain-editor.frontend.topology.replay-model-test 'graph.lain-editor.frontend.topology.stack-scene-model-test 'graph.lain-editor.frontend.ui.fullscreen-test 'graph.lain-editor.frontend.ui.reactive-test 'graph.lain-editor.frontend.values.value-folding-test 'graph.lain-editor.frontend.view.workspace-test 'graph.lain-editor.frontend.workspace.block-display-test 'graph.lain-editor.frontend.workspace.controller-test 'graph.lain-editor.frontend.workspace.desktop-test 'graph.lain-editor.frontend.workspace.model-test 'graph.lain-editor.frontend.workspace.remote-files-test 'graph.lain-editor.frontend.workspace.source-save-test 'graph.lain-editor.frontend.workspace.file-links-test 'graph.lain-editor.frontend.workspace.status-error-test 'graph.lain-editor.layout.node-clearance-test 'graph.lain-editor.workspace.layers-test))
 
 (set! *main-cli-fn* -main)
