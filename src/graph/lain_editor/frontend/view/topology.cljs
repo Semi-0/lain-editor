@@ -11,13 +11,13 @@
   (let [detail (get-in vm [:remote :topology id :details (:key scene)])
         valid? (= [(:frame scene) (:observation scene)] (:owner detail))]
     (assoc scene :detail (when valid?
-                          (update (assoc detail :runtime-open? (get-in scene [:ui :runtime-details (:node detail)] false)) :result
-                                  (fn [result]
-                                    (when result
-                                      (update result :selected
-                                              #(folding/project-node (assoc % :id (:node detail))
-                                                                     (:folded (model/pane-ui vm id) #{})
-                                                                     (model/context vm id) true))))))
+                           (update (assoc detail :runtime-open? (get-in scene [:ui :runtime-details (:node detail)] false)) :result
+                                   (fn [result]
+                                     (when result
+                                       (update result :selected
+                                               #(folding/project-node (assoc % :id (:node detail))
+                                                                      (:folded (model/pane-ui vm id) #{})
+                                                                      (model/context vm id) true))))))
            :changed-node-ids (get-in vm [:remote :topology id :changed-node-ids] #{})
            :update-counts (get-in vm [:remote :topology id :update-counts (:key scene)] {}))))
 
@@ -41,6 +41,7 @@
     [:div {:class "value-view"}
      (cond
        (:error entry) (:error entry)
+       (:replay output) (view vm id)
        (:valueGrid output) (grid/view "" (:valueGrid output) {} [id nil])
        output (:value output)
        :else nil)]))

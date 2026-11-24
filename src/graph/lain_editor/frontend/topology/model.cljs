@@ -39,7 +39,7 @@
         nested-valid? (= [(:generation (:request (entry vm id))) (:sequence frame)] (:owner nested))
         graph (if recorded? (if nested-valid? (:graph nested) (:graph frame)) (:graph output))
         scene (fn [graph]
-                {:key (graph-key vm id graph) :source graph :recorded? recorded?
+                {:key (graph-key vm id graph) :source (if recorded? (replay/caption-amb-replay graph) graph) :recorded? recorded?
                  :frame (:sequence frame) :observation (:semanticObservation graph)
                  :request (cond-> (dissoc (:request (entry vm id)) :refresh)
                             recorded? (assoc :recorded true :parent (:semanticScope graph)))})]
@@ -75,15 +75,19 @@
         points (if (and (:node drag) (:position drag))
                  (viewport/clear-points (update positions (:node drag) merge (select-keys (:position drag) [:x :y])) (:node drag))
                  (viewport/clear-points positions))
-        camera (or (:camera ui) (viewport/fit-view points default-camera))]
-    (assoc source-scene :graph graph :signature signature :points points :camera camera
+        result-ids (:result-ids graph)
+        camera (if (and (seq result-ids) (not (:interacted? ui)))
+                 (viewport/fit-view (if (:overview? ui) points (select-keys points result-ids))
+                                    {:width 0 :height 0})
+                 (or (:camera ui) (viewport/fit-view points default-camera)))]
+    (assoc source-scene :graph graph :signature signature :points points :camera camera :result-ids result-ids
            :settings (merge default-settings (:settings ui)) :layout layout :ui ui)))
 
 (defn scenes [vm id] (mapv #(scene vm id %) (source-scenes vm id)))
 (defn find-scene [vm id key] (some #(when (= key (:key %)) %) (scenes vm id)))
 (defn historical-inspection [graph id]
   (when-let [node (some #(when (= id (:id %)) %) (:nodes graph))]
-    {:historical true :selected (assoc node :name (:label node) :summary (:value node))
+    {:historical true :selected (assoc node :name (or (:caption node) (:label node)) :summary (:value node))
      :value (str (:label node) "\n" (:value node)) :valueGrid (:valueGrid node) :nodes (:nodes graph)}))
 (defn fields [vm id graph]
   (vec (for [node (:nodes graph) :when (= "cell" (:kind node))

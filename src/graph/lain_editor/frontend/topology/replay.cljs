@@ -8,6 +8,10 @@
         ancestors (get-in (model/pane-ui vm id) [:replay :ancestors])]
     [:div {:class "replay-view" :data-replay-index (str index)}
      [:div {:class "replay-controls"}
+      (when (seq (:result-ids scene))
+        [:button {:aria-label (if (get-in scene [:ui :overview?]) "Focus result" "Show full graph")
+                  :on {:click [[:graph/toggle-result-focus id (:key scene)]]}}
+         (if (get-in scene [:ui :overview?]) "Focus result" "Full graph")])
       [:button {:aria-label "Previous observation" :disabled (zero? index)
                 :on {:click [[:replay/seek id (dec index)]]}} "◁"]
       [:button {:aria-label "Play recorded propagation" :disabled (< (count frames) 2)
@@ -18,7 +22,7 @@
                :aria-label "Recorded observation" :disabled (empty? frames) :value (str index)
                :on {:input [[:replay/seek id [:event/target.value]]]}}]
       [:span {:class "replay-time"} (str (get-in frames [index :elapsedMs] 0) " ms · "
-                                        (if (seq frames) (inc index) 0) "/" (count frames))]]
+                                         (if (seq frames) (inc index) 0) "/" (count frames))]]
      [:div {:class "semantic-scope-trail"}
       (when (seq ancestors)
         [:div [:button {:on {:click [[:replay/leave-scope id]]}} "Back to enclosing scope"]

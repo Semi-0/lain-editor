@@ -26,3 +26,25 @@
     (is (not= (model/playback-key playing) (model/playback-key (model/advance playing))))
     (is (nil? (model/playback-key (assoc playing :playing? false))))
     (is (nil? (model/playback-key (model/seek playing 2))))))
+
+(deftest choice-and-backtrack-output-have-distinct-captions
+  (let [graph {:nodes [{:id 1 :label "amb" :kind "propagator"}
+                       {:id 2 :label "chosen" :kind "cell" :value "2"}
+                       {:id 3 :label "=" :kind "propagator"}
+                       {:id 4 :label "valid" :kind "cell" :value "true"}
+                       {:id 5 :label "require" :kind "propagator"}
+                       {:id 6 :label "failure" :kind "cell"
+                        :valueGrid [{:key "status" :value ":satisfied"}]}
+                       {:id 7 :label "backtrack" :kind "propagator"}
+                       {:id 8 :label "RESULT" :kind "cell" :value "{:action :idle}"}]
+               :edges (mapv (fn [[from to]] {:from from :to to})
+                            [[1 2] [2 3] [3 4] [4 5] [5 6] [7 8]])}
+        final (model/caption-amb-replay graph)
+        pending (model/caption-amb-replay (assoc-in graph [:nodes 5 :valueGrid 0 :value] ":pending"))]
+    (is (= #{2 4} (:result-ids final)))
+    (is (= "Candidate (chosen)" (get-in pending [:nodes 1 :caption])))
+    (is (= "Search result (chosen)" (get-in final [:nodes 1 :caption])))
+    (is (= "backtrack output" (get-in final [:nodes 7 :caption])))
+    (is (= graph (-> final (dissoc :result-ids) (update :nodes #(mapv (fn [n] (dissoc n :caption)) %)))))
+    (let [unrelated (update graph :edges subvec 1)]
+      (is (= unrelated (model/caption-amb-replay unrelated))))))

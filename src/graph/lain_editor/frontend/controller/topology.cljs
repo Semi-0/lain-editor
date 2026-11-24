@@ -153,7 +153,7 @@
                    :else (api! id request (.-signal controller)))]
         (swap! (:details owner) assoc key controller)
         (swap! s/remote assoc-in [:topology id :details key]
-               {:node node-id :label (:label node) :chase? chase? :owner context})
+               {:node node-id :label (or (:caption node) (:label node)) :chase? chase? :owner context})
         (-> read
             (.then (fn [result]
                      (when (current?)
@@ -185,42 +185,42 @@
                                       (when (alive? id (:token owner))
                                         (reset! (:playback owner) nil)
                                         (change-ui! id assoc :replay (let [next (replay/advance (model/frame-state (snapshot) id))]
-                                          (assoc (dissoc next :frames) :sequence (get-in next [:frames (:index next) :sequence]))))))
+                                                                       (assoc (dissoc next :frames) :sequence (get-in next [:frames (:index next) :sequence]))))))
                                     (replay/delay-ms state))}))))))
 
 (defn attach!
   ([scope id] (attach! scope id {:api! effects/api!}))
   ([scope id services]
-  (when-let [old (runtime id)] ((:dispose! old)))
-  (let [local (rx/scope) token (random-uuid)
-        owner {:token token :api! (:api! services) :layouts (atom {}) :details (atom {}) :detail-cache (atom {})
-               :animations (atom {}) :observers (atom {}) :playback (atom nil) :flashed (atom {}) :pulse! (flash/mount! local)}
-        dispose! (fn []
-                   (when (alive? id token)
-                     (doseq [[_ entry] @(:layouts owner)] (rx/dispose! (:scope entry)))
-                     (doseq [[_ controller] @(:details owner)] (.abort controller))
-                     (doseq [[_ entry] @(:animations owner)] (when (:frame entry) (js/cancelAnimationFrame (:frame entry))))
-                     (doseq [[_ observer] @(:observers owner)] (.disconnect observer))
-                     (when-let [timer (:timer @(:playback owner))] (js/clearTimeout timer))
-                     (swap! running dissoc id)
-                     (rx/dispose! local)))
-        descriptor (s/pane-cell local id) request (s/request-cell local id descriptor)]
-    (swap! running assoc id (assoc owner :dispose! dispose!))
-    (inspection/attach! local id request (:api! owner))
-    (rx/watch! local (rx/derive! local #(get % id) s/results)
-               (fn [entry]
-                 (when (alive? id token)
+   (when-let [old (runtime id)] ((:dispose! old)))
+   (let [local (rx/scope) token (random-uuid)
+         owner {:token token :api! (:api! services) :layouts (atom {}) :details (atom {}) :detail-cache (atom {})
+                :animations (atom {}) :observers (atom {}) :playback (atom nil) :flashed (atom {}) :pulse! (flash/mount! local)}
+         dispose! (fn []
+                    (when (alive? id token)
+                      (doseq [[_ entry] @(:layouts owner)] (rx/dispose! (:scope entry)))
+                      (doseq [[_ controller] @(:details owner)] (.abort controller))
+                      (doseq [[_ entry] @(:animations owner)] (when (:frame entry) (js/cancelAnimationFrame (:frame entry))))
+                      (doseq [[_ observer] @(:observers owner)] (.disconnect observer))
+                      (when-let [timer (:timer @(:playback owner))] (js/clearTimeout timer))
+                      (swap! running dissoc id)
+                      (rx/dispose! local)))
+         descriptor (s/pane-cell local id) request (s/request-cell local id descriptor)]
+     (swap! running assoc id (assoc owner :dispose! dispose!))
+     (inspection/attach! local id request (:api! owner))
+     (rx/watch! local (rx/derive! local #(get % id) s/results)
+                (fn [entry]
+                  (when (alive? id token)
 
-                   (reset! (:detail-cache owner) {})
-                   (synchronize-layouts! id)
-                   (refresh-details! id))))
-    (rx/watch! local (rx/derive! local #(get-in % (ui-path id)) s/ui)
-               (fn [_]
-                 (when (alive? id token)
-                   (synchronize-layouts! id)
-                   (synchronize-playback! id))))
-    (rx/own! scope dispose!)
-    {:dispose! dispose!})))
+                    (reset! (:detail-cache owner) {})
+                    (synchronize-layouts! id)
+                    (refresh-details! id))))
+     (rx/watch! local (rx/derive! local #(get-in % (ui-path id)) s/ui)
+                (fn [_]
+                  (when (alive? id token)
+                    (synchronize-layouts! id)
+                    (synchronize-playback! id))))
+     (rx/own! scope dispose!)
+     {:dispose! dispose!})))
 
 (defn- local-point [canvas event]
   (if (and (exists? js/DOMPoint) (.getScreenCTM canvas))
@@ -238,7 +238,7 @@
     (let [canvas (canvas-for event) target (.closest (.-target event) "[data-node-id]")
           node (when target (.getAttribute target "data-node-id")) point (local-point canvas event)]
       (.setPointerCapture canvas (.-pointerId event))
-      (change-scene! id key assoc :interacted? true
+      (change-scene! id key assoc :interacted? true :camera (:camera current)
                      :drag {:node node :origin point :camera (:camera current) :node-origin (get (:points current) node) :moved? false}))))
 
 (defn- pointer-move! [id key event]
@@ -249,8 +249,8 @@
             moved? (or (:moved? drag) (> (js/Math.hypot dx dy) 3))]
         (if node
           (change-scene! id key assoc :drag (assoc drag :moved? moved?
-                                                 :position (assoc node-origin :x (+ (:x node-origin) (/ dx (:scale camera)))
-                                                                                 :y (+ (:y node-origin) (/ dy (:scale camera))))))
+                                                   :position (assoc node-origin :x (+ (:x node-origin) (/ dx (:scale camera)))
+                                                                    :y (+ (:y node-origin) (/ dy (:scale camera))))))
           (change-scene! id key assoc :camera (assoc camera :x (+ (:x camera) dx) :y (+ (:y camera) dy))
                          :drag (assoc drag :moved? moved?)))))))
 
@@ -281,7 +281,7 @@
                     (when-let [current (scene id key)]
                       (let [camera (:camera current)
                             next (viewport/grow-view camera {:width (max 1 (.-clientWidth scroller)) :height (max 1 (.-clientHeight scroller))})]
-                        (when (not= camera next) (change-scene! id key assoc :camera next)))))]
+                        (when (and (empty? (:result-ids current)) (not= camera next)) (change-scene! id key assoc :camera next)))))]
       (when-let [old (get @(:observers owner) key)] (.disconnect old))
       (when (exists? js/ResizeObserver)
         (let [observer (js/ResizeObserver. (fn [_] (measure)))]
@@ -298,7 +298,7 @@
           (cancel-detail! id :scope)
           (swap! (:details owner) assoc :scope controller)
           (-> (api! id (assoc (dissoc (:request current) :refresh :recorded) :op "inspect" :parent node :recordedObservation observation)
-                            (.-signal controller))
+                    (.-signal controller))
               (.then (fn [response]
                        (when (and (alive? id token) (identical? controller (get @(:details (runtime id)) :scope))
                                   (= frame (:frame (scene id key))))
@@ -313,7 +313,7 @@
 (defn- replay-seek! [id index]
   (let [next (-> (model/frame-state (snapshot) id) (replay/seek (js/Number index)))]
     (change-ui! id assoc :replay (assoc (dissoc next :frames) :playing? false :ancestors []
-                                      :sequence (get-in next [:frames (:index next) :sequence]))))
+                                        :sequence (get-in next [:frames (:index next) :sequence]))))
   (swap! s/remote update-in [:topology id] dissoc :recorded-scope)
   (refresh-details! id))
 
@@ -327,7 +327,7 @@
                 (keep (fn [{:keys [from source-node]}]
                         (when-let [plane (some #(when (= (str from) (.getAttribute % "data-plane-id")) %) planes)]
                           (when-let [node (some #(when (= (str source-node) (.getAttribute % "data-node-id")) %)
-                                               (array-seq (.querySelectorAll plane ".graph-node")))]
+                                                (array-seq (.querySelectorAll plane ".graph-node")))]
                             (let [node-bounds (.getBoundingClientRect node)
                                   ;; Quantized measurements prevent insignificant floating-point feedback.
                                   quantize #(/ (js/Math.round (* % 1000)) 1000)]
@@ -352,6 +352,8 @@
                        (when-let [frame (.querySelector target ".node-frame")]
                          (when-let [label (.querySelector target ".node-label")]
                            ((:pulse! owner) {:node {:id owner-key} :group target :frame frame :label label}))))))
+    :graph/toggle-result-focus
+    (change-scene! id key #(-> % (update :overview? not) (dissoc :camera :interacted?)))
     :graph/pointer-down (pointer-down! id key value)
     :graph/pointer-move (pointer-move! id key value)
     :graph/pointer-up (pointer-up! id key value false)
@@ -386,7 +388,7 @@
     :replay/toggle (let [state (model/frame-state (snapshot) id)]
                      (change-ui! id assoc :replay
                                  (dissoc (if (:playing? state) (assoc state :playing? false)
-                                           (assoc (if (= (:index state) (dec (count (:frames state)))) (replay/seek state 0) state) :playing? true)) :frames)))
+                                             (assoc (if (= (:index state) (dec (count (:frames state)))) (replay/seek state 0) state) :playing? true)) :frames)))
     :replay/leave-scope (let [ui (model/pane-ui (snapshot) id) ancestors (get-in ui [:replay :ancestors])
                               frame (get-in (model/frame-state (snapshot) id) [:frames (:index (model/frame-state (snapshot) id))])]
                           (when (seq ancestors)
@@ -401,14 +403,14 @@
                         (when (.contains (.-classList target) "stack-scene-viewport")
                           (prevent! event) (.setPointerCapture target (.-pointerId event))
                           (change-ui! id assoc :stack-drag {:x (.-clientX event) :y (.-clientY event)
-                                                          :camera (model/stack-camera (snapshot) id)})))
+                                                            :camera (model/stack-camera (snapshot) id)})))
     :graph/stack-move (when-let [drag (:stack-drag (model/pane-ui (snapshot) id))]
                         (prevent! key)
                         (change-ui! id assoc :stack-camera (stack/pan (:camera drag) (- (.-clientX key) (:x drag)) (- (.-clientY key) (:y drag)))))
     :graph/stack-up (change-ui! id dissoc :stack-drag)
     :graph/stack-wheel (do (prevent! key)
-                          (change-ui! id assoc :stack-camera (stack/zoom (model/stack-camera (snapshot) id)
-                                                                       (if (neg? (.-deltaY key)) 1.08 (/ 1 1.08)))))
+                           (change-ui! id assoc :stack-camera (stack/zoom (model/stack-camera (snapshot) id)
+                                                                          (if (neg? (.-deltaY key)) 1.08 (/ 1 1.08)))))
     (throw (ex-info "Unknown topology event" {:event event}))))
 
 (defn register! []

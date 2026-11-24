@@ -12,15 +12,15 @@
       (let [dx (- (:x b) (:x a)) dy (- (:y b) (:y a))
             inset (fn [point]
                     (min 0.48 (/ (+ (/ (:width point) 2) 4) (max 0.001 (abs dx)))
-                              (/ (+ (/ (:height point) 2) 4) (max 0.001 (abs dy)))))
+                         (/ (+ (/ (:height point) 2) 4) (max 0.001 (abs dy)))))
             start (inset a) end (- 1 (inset b))
             point (fn [t] (str (+ (:x a) (* dx t)) "," (+ (:y a) (* dy t))))]
         (str (point start) " " (point (/ (+ start end) 2)) " " (point end))))))
 
-(defn node-view [node point references context changed? update-count]
+(defn node-view [node point references context changed? update-count result?]
   (let [[pane scene] context [width height] (viewport/node-size node)]
-    [:g {:replicant/key (:id node) :class (cond-> ["graph-node"] changed? (conj "graph-node-changed"))
-         :tabindex 0 :role "button" :aria-label (str "Inspect " (:label node))
+    [:g {:replicant/key (:id node) :class (cond-> ["graph-node"] changed? (conj "graph-node-changed") result? (conj "graph-result-node"))
+         :tabindex 0 :role "button" :aria-label (str "Inspect " (or (:caption node) (:label node)))
          :data-node-id (:id node) :data-kind (:kind node)
          :replicant/on-render [[:graph/flash pane scene (:id node) update-count [:event/target]]]
          :transform (str "translate(" (:x point) " " (:y point) ")")
@@ -35,13 +35,13 @@
               :value (str (:spacing settings))
               :on {:change [[:graph/spacing pane key [:event/target.value]]]}}
      (map (fn [[factor label]] [:option {:replicant/key factor :value (str factor) :selected (= factor (:spacing settings))} label])
-           [[1 "Normal (1×)"] [1.5 "Roomy (1.5×)"] [2 "Wide (2×)"] [3 "Very wide (3×)"]])]]
+          [[1 "Normal (1×)"] [1.5 "Roomy (1.5×)"] [2 "Wide (2×)"] [3 "Very wide (3×)"]])]]
    [:label "Layout budget "
     [:select {:aria-label "Layout time budget" :title "Stops early at movement tolerance; time checks occur between solver batches."
               :value (str (:budgetMs settings))
               :on {:change [[:graph/budget pane key [:event/target.value]]]}}
      (map (fn [[ms label]] [:option {:replicant/key ms :value (str ms) :selected (= ms (:budgetMs settings))} label])
-           [[250 "250 ms"] [1000 "1 second"] [3000 "3 seconds"] [10000 "10 seconds"]])]]
+          [[250 "250 ms"] [1000 "1 second"] [3000 "3 seconds"] [10000 "10 seconds"]])]]
    [:button {:on {:click [[:graph/refine pane key]]}} "Refine layout"]])
 
 (defn detail-view [detail context]
@@ -60,9 +60,9 @@
            (:result detail) (call-detail/view (:result detail) context (:node detail) (:runtime-open? detail false))
            :else "Reading runtime node…")]])]))
 
-(defn view [pane {:keys [key graph points camera settings layout ui changed-node-ids update-counts detail]}]
+(defn view [pane {:keys [key graph points camera settings layout ui changed-node-ids update-counts detail result-ids]}]
   (let [context [pane key] marker (str "arrow-" (hash key)) refs (grid/references (:nodes graph))]
-    [:div {:class "graph-wrap" :replicant/key key}
+    [:div {:class (if (seq result-ids) "graph-wrap result-replay" "graph-wrap") :replicant/key key}
      [:span {:class "layout-status"} (:status layout)]
      [:div {:class "semantic-summary"} (str (count (:nodes graph)) " nodes · " (count (:edges graph)) " edges")]
      (when (or (:partial graph) (seq (:diagnostics graph)))
@@ -70,7 +70,8 @@
         (str (when (:partial graph) "Partial capture. ") (str/join " · " (map :message (:diagnostics graph))))])
      [:div {:class "graph-scroller"}
       [:svg {:class "graph-svg" :aria-label "Semantic topology" :viewBox (str "0 0 " (:width camera) " " (:height camera))
-             :style {:width (str (:width camera) "px") :height (str (:height camera) "px")}
+             :style (if (seq result-ids) {:width "100%" :height "100%"}
+                        {:width (str (:width camera) "px") :height (str (:height camera) "px")})
              :data-layout-phase (if (< (:animation-progress ui 1) 1) "stress" "settled")
              :data-layout-iteration (get-in layout [:result :iterationsUsed] 0)
              :data-layout-samples (count (get-in layout [:result :frames]))
@@ -88,10 +89,10 @@
          [:path {:d "M0 5 L5 0 L5 10 Z M14 5 L9 0 L9 10 Z" :fill "#ddd"}]]]
        [:g {:transform (str "translate(" (:x camera) " " (:y camera) ") scale(" (:scale camera) ")")}
         (map (fn [index edge]
-                (when-let [positions (edge-points points edge)]
-                  [:polyline {:replicant/key [(:from edge) (:to edge) index] :points positions :fill "none" :stroke "#ddd"
-                              :stroke-width 1 :vector-effect "non-scaling-stroke"
-                              :marker-mid (str "url(#" marker (when (:bidirectional edge) "-both") ")")}]))
-              (range) (:edges graph))
-        (map #(node-view % (get points (:id %)) refs context (contains? changed-node-ids (:id %)) (get update-counts (:id %) 0)) (:nodes graph))]]]
+               (when-let [positions (edge-points points edge)]
+                 [:polyline {:replicant/key [(:from edge) (:to edge) index] :points positions :fill "none" :stroke "#ddd"
+                             :stroke-width 1 :vector-effect "non-scaling-stroke"
+                             :marker-mid (str "url(#" marker (when (:bidirectional edge) "-both") ")")}]))
+             (range) (:edges graph))
+        (map #(node-view % (get points (:id %)) refs context (contains? changed-node-ids (:id %)) (get update-counts (:id %) 0) (contains? result-ids (:id %))) (:nodes graph))]]]
      (detail-view detail context)]))

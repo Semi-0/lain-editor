@@ -24,3 +24,32 @@
   (if (and playing? (< index (dec (count frames))))
     [index (get-in frames [index :sequence]) (get-in frames [(inc index) :sequence]) (delay-ms state)]
     nil))
+
+(defn caption-amb-replay [{:keys [nodes edges] :as graph}]
+  (let [by-id (into {} (map (juxt :id identity)) nodes)
+        inputs (group-by :to edges)
+        producers (fn [node] (map #(by-id (:from %)) (inputs (:id node))))
+        from? (fn [node kind label]
+                (some #(and (= kind (:kind %)) (= label (:label %))) (producers node)))
+        choice (some #(when (and (= "chosen" (:label %)) (from? % "propagator" "amb")) %) nodes)
+        check (some #(when (and (= "valid" (:label %))
+                                (some (fn [op] (and (= "=" (:label op))
+                                                    (some #{choice} (producers op)))) (producers %))) %) nodes)
+        requirement (some #(when (and (= "require" (:label %)) (some #{check} (producers %))) %) nodes)
+        satisfied? (and (= "true" (:value check))
+                        (some #(and (some #{requirement} (producers %))
+                                    (some (fn [row] (and (= "status" (:key row)) (= ":satisfied" (:value row))))
+                                          (:valueGrid %))) nodes))]
+    (if (and choice check)
+      (assoc graph :result-ids #{(:id choice) (:id check)}
+             :nodes (mapv (fn [node]
+                            (cond
+                              (= (:id choice) (:id node))
+                              (assoc node :caption (if satisfied? "Search result (chosen)" "Candidate (chosen)"))
+                              (and (= "cell" (:kind node)) (= "RESULT" (:label node)))
+                              (let [origins (producers node)]
+                                (assoc node :caption (if (= 1 (count origins))
+                                                       (str (:label (first origins)) " output")
+                                                       "Expression value")))
+                              :else node)) nodes))
+      graph)))

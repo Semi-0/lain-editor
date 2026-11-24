@@ -369,3 +369,10 @@ svg .node-frame, svg .source-reference rect { rx: 0; ry: 0; }
 .server-file-browser input[type=search] { width: 100%; box-sizing: border-box; margin-bottom: 12px; }
 .server-file-list { display: flex; flex-direction: column; gap: 4px; max-height: 45vh; min-height: 100px; overflow: auto; }
 .server-file-list button { text-align: left; padding: 8px; }
+
+.replay-graph:has(.result-replay) {display:flex;flex-direction:column;min-height:0}
+.result-replay .graph-scroller {overflow:hidden}
+.result-replay .graph-result-node .node-frame {stroke:#ffdc83;stroke-width:2;vector-effect:non-scaling-stroke}
+.result-replay .graph-result-node .node-name {fill:#ffdc83}
+.layer-result > .value-view:has(> .replay-view) {margin:0;width:100%;max-width:100%;height:100%;overflow:hidden}
+.layer-stage.overlay > .layer-result:has(.replay-view) {bottom:0;pointer-events:auto}

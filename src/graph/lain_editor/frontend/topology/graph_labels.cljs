@@ -8,9 +8,9 @@
 (defn description [node]
   (if (:valueGrid node)
     (str/join "\n" (map presentation/display-text
-                         (cons (:label node)
-                               (map #(str/trim (str (:key %) " " (:value %))) (:valueGrid node)))))
-    (presentation/display-text (str (:label node) "\n" (:value node)))))
+                        (cons (or (:caption node) (:label node))
+                              (map #(str/trim (str (:key %) " " (:value %))) (:valueGrid node)))))
+    (presentation/display-text (str (or (:caption node) (:label node)) "\n" (:value node)))))
 
 (defn frame-view [node]
   [:rect (merge (viewport/node-frame node)
@@ -42,16 +42,16 @@
 (defn- linked-list-view [{:keys [top bottom list-layout list-x]} references context]
   [:g {:class "linked-list" :transform (str "translate(" (or list-x 0) " " (/ (+ top bottom) 2) ")")}
    (map (fn [index {:keys [points dot]}]
-           [:g {:replicant/key [:link index]}
-            [:polyline {:points (str/join " " (map #(str/join "," %) points))
-                        :fill "none" :stroke "#eee" :stroke-width 1}]
-            [:circle {:cx (first dot) :cy (second dot) :r 2.5 :fill "#eee"}]])
-         (range) (:links list-layout))
+          [:g {:replicant/key [:link index]}
+           [:polyline {:points (str/join " " (map #(str/join "," %) points))
+                       :fill "none" :stroke "#eee" :stroke-width 1}]
+           [:circle {:cx (first dot) :cy (second dot) :r 2.5 :fill "#eee"}]])
+        (range) (:links list-layout))
    (map (fn [index {:keys [node terminal? x y]}]
-           (if terminal?
-             [:circle {:replicant/key [:item index] :cx x :cy y :r 3 :fill "#eee" :class "list-end"}]
-             [:g {:replicant/key [:item index] :class "list-element" :transform (str "translate(" x " " y ")")}
-              (view node references context)])) (range) (:items list-layout))])
+          (if terminal?
+            [:circle {:replicant/key [:item index] :cx x :cy y :r 3 :fill "#eee" :class "list-end"}]
+            [:g {:replicant/key [:item index] :class "list-element" :transform (str "translate(" x " " y ")")}
+             (view node references context)])) (range) (:items list-layout))])
 
 (defn- tree-branches [rows left]
   (let [entries (into {} (map (juxt :tree-id identity)) (filter :tree-first? rows))
@@ -76,13 +76,13 @@
     [:g {:class "node-label"}
      (tree-branches rows left)
      (map (fn [index {:keys [text y top bottom role sourceToken sourceReference list-layout tree? tree-depth] :as row}]
-             (let [x (if tree? (+ left 12 (* viewport/tree-indent tree-depth)) 0)]
-               [:g {:replicant/key [:row index]}
-                (when-let [control (:foldControl row)] (fold-control x y control context))
-                (cond
-                  list-layout (linked-list-view (cond-> row tree? (assoc :list-x (+ x (/ (:width list-layout) 2)))) references context)
-                  sourceToken (let [width (+ 18 (viewport/text-width text)) start (if tree? x (- (/ width 2)))]
-                                [:g (source-marker/view start (+ (/ (+ top bottom) 2) 3.5) sourceToken sourceReference references context)
-                                 (text-view (+ start 18) y text "start" role references context)])
-                  :else (text-view x y text (if tree? "start" "middle") role references context))]))
-           (range) rows)]))
+            (let [x (if tree? (+ left 12 (* viewport/tree-indent tree-depth)) 0)]
+              [:g {:replicant/key [:row index]}
+               (when-let [control (:foldControl row)] (fold-control x y control context))
+               (cond
+                 list-layout (linked-list-view (cond-> row tree? (assoc :list-x (+ x (/ (:width list-layout) 2)))) references context)
+                 sourceToken (let [width (+ 18 (viewport/text-width text)) start (if tree? x (- (/ width 2)))]
+                               [:g (source-marker/view start (+ (/ (+ top bottom) 2) 3.5) sourceToken sourceReference references context)
+                                (text-view (+ start 18) y text "start" role references context)])
+                 :else (text-view x y text (if tree? "start" "middle") role references context))]))
+          (range) rows)]))
