@@ -633,24 +633,26 @@ try {
   await check('recorded learning replay scrubs and inspects frozen values', async () => {
     await paletteCommand('Switch to desktop: 3');
     await paletteCommand('Run block');
-    await page.locator('.pane.selected .replay-view').waitFor({ state: 'visible' });
-    const slider = page.getByRole('slider', { name: 'Recorded observation', exact: true });
-    await page.waitForFunction(() => {
-      const slider = document.querySelector('.pane.selected input[aria-label="Recorded observation"]');
-      return slider !== null && Number(slider.max) >= 1;
-    }, null, { timeout });
+    const replaySelector = '.pane.selected [data-layer-id="result"] .replay-view';
+    const replay = page.locator(replaySelector);
+    await replay.waitFor({ state: 'visible' });
+    const slider = replay.getByRole('slider', { name: 'Recorded observation', exact: true });
+    const previous = replay.getByRole('button', { name: 'Previous observation', exact: true });
+    const next = replay.getByRole('button', { name: 'Next observation', exact: true });
+    await page.waitForFunction(selector => {
+      const slider = document.querySelector(selector)?.querySelector('input[aria-label="Recorded observation"]');
+      return slider != null && Number(slider.max) >= 1;
+    }, replaySelector, { timeout });
     await slider.press('Home');
-    await page.waitForFunction(() => document.querySelector('.pane.selected .replay-view')?.dataset.replayIndex === '0');
-    assert.equal(await page.getByRole('button', { name: 'Previous observation', exact: true }).isDisabled(), true);
-    await page.getByRole('button', { name: 'Next observation', exact: true }).click();
-    await page.waitForFunction(() => Number(document.querySelector('.pane.selected .replay-view')?.dataset.replayIndex) > 0);
+    await replay.and(page.locator('[data-replay-index="0"]')).waitFor({ state: 'visible' });
+    assert.equal(await previous.isDisabled(), true);
+    await next.click();
+    await page.waitForFunction(selector => Number(document.querySelector(selector)?.dataset.replayIndex) > 0,
+      replaySelector, { timeout });
     await slider.press('End');
-    await page.waitForFunction(() => {
-      const replay = document.querySelector('.pane.selected .replay-view');
-      const slider = document.querySelector('.pane.selected input[aria-label="Recorded observation"]');
-      return replay !== null && slider !== null && replay.dataset.replayIndex === slider.max;
-    });
-    assert.equal(await page.getByRole('button', { name: 'Next observation', exact: true }).isDisabled(), true);
+    const lastIndex = Number(await slider.getAttribute('max'));
+    await replay.and(page.locator(`[data-replay-index="${lastIndex}"]`)).waitFor({ state: 'visible' });
+    assert.equal(await next.isDisabled(), true);
     const liveNodeReads = [];
     const observe = request => {
       if (request.method() === 'POST' && new URL(request.url()).pathname === '/api') {
@@ -661,7 +663,7 @@ try {
       }
     };
     page.on('request', observe);
-    const node = page.locator('.pane.selected .graph-svg .graph-node[data-kind="cell"]').first();
+    const node = replay.locator('.graph-svg .graph-node[data-kind="cell"]').first();
     await node.focus();
     await node.press('Enter');
     await page.locator('.pane.selected .node-value-section[aria-label="strongest"]').waitFor({ state: 'visible' });
@@ -669,7 +671,7 @@ try {
     assert.equal(liveNodeReads.length, 0, 'recorded detail must not issue live node inspection');
     page.off('request', observe);
     report.replay = {
-      lastIndex: Number(await slider.getAttribute('max')),
+      lastIndex,
       inspectedFrozenNode: await node.getAttribute('data-node-id'),
       liveNodeReads: liveNodeReads.length,
     };
