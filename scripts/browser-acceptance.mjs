@@ -633,7 +633,7 @@ try {
   await check('recorded learning replay scrubs and inspects frozen values', async () => {
     await paletteCommand('Switch to desktop: 3');
     await paletteCommand('Run block');
-    const replaySelector = '.pane.selected [data-layer-id="result"] .replay-view';
+    const replaySelector = '.pane.selected [data-layer-id="topology"] .replay-view';
     const replay = page.locator(replaySelector);
     await replay.waitFor({ state: 'visible' });
     const slider = replay.getByRole('slider', { name: 'Recorded observation', exact: true });
@@ -666,8 +666,8 @@ try {
     const node = replay.locator('.graph-svg .graph-node[data-kind="cell"]').first();
     await node.focus();
     await node.press('Enter');
-    await page.locator('.pane.selected .node-value-section[aria-label="strongest"]').waitFor({ state: 'visible' });
-    await page.locator('.pane.selected .node-value-section[aria-label="content"]').waitFor({ state: 'visible' });
+    await replay.getByRole('region', { name: 'strongest', exact: true }).waitFor({ state: 'visible' });
+    await replay.getByRole('region', { name: 'content', exact: true }).waitFor({ state: 'visible' });
     assert.equal(liveNodeReads.length, 0, 'recorded detail must not issue live node inspection');
     page.off('request', observe);
     report.replay = {
@@ -675,7 +675,7 @@ try {
       inspectedFrozenNode: await node.getAttribute('data-node-id'),
       liveNodeReads: liveNodeReads.length,
     };
-    await page.getByRole('button', { name: 'Close node view', exact: true }).click();
+    await replay.getByRole('button', { name: 'Close node view', exact: true }).click();
   });
   await check('fold cell selection survives a desktop remount', async () => {
     await visualizerSettings();
