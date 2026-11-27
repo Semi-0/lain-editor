@@ -411,3 +411,17 @@ and replaces interior colons with spaces (`p:slot` becomes `p slot`), while quot
 strings and cell identities remain unchanged. Wires, arrowheads, and list dots use
 one shared color. Node sizes follow rendered content; graph layout does not shrink
 text to force the topology into a pane.
+
+### Reload a live definition
+
+In a running managed pane, edit a Lain network or literal definition and choose
+**Reload definitions in this session** from the command palette. The updated
+definition is available to subsequent evaluations in the same run, along with
+the existing chat inputs and history. Save the file separately to persist the
+edit. The same command checks imported Lain files when the main text is unchanged.
+
+A program can route requests through `(editor:live-call policy packet)` to
+choose the current policy for each new packet ID. Calls already underway finish
+with their original definition. Existing static connections retain their
+original callable. Edits to native modules or installed wiring require a
+separate migration. The command keeps the draft on rejection.

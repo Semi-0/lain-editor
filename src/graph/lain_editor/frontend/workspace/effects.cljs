@@ -165,7 +165,7 @@
   ([id op compiler-session? saved]
    (let [pane (model/pane @s/workspace id)
          extensions (model/extension-sources pane)
-         source (case op "run" (:source pane) "extend" (:extensionDraft pane)
+         source (case op ("run" "reload") (:source pane) "extend" (:extensionDraft pane)
                       (throw (js/Error. "Unknown source operation")))]
      (if (and (:development pane) (= op "run"))
        (dispatch! [:development/commit id])
@@ -180,6 +180,7 @@
                                                      (fn [p]
                                                        (case op
                                                          "run" (model/committed-source p source extensions)
+                                                         "reload" (assoc p :executedSource source)
                                                          "extend" (model/extended-source p source)
                                                          (throw (js/Error. "Unknown source operation")))))
                                      (when-let [mode (:displayMode result)]
@@ -639,6 +640,7 @@
                                   (reset! s/selected-id (desktops/selected-id @s/workspace))))
       :switch-desktop (s/switch-desktop! target)
       :run (run! target "run")
+      :reload (run! target "reload")
       :run-legacy (run! target "run" false)
       :close-extension-editor (swap! s/ui update-in [:panes-ui target :hidden-extension-editors] (fnil conj #{}) extensionId)
       :reopen-extension-editor (swap! s/ui update-in [:panes-ui target :hidden-extension-editors] disj extensionId)

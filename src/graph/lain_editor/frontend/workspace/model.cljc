@@ -248,7 +248,7 @@
                (when (= false (:autoRefresh p)) " · manual refresh"))))
 
 (def command-specs
-  [[:run "Run block"] [:load "Open file…"] [:save-block "Save file…"]
+  [[:run "Run block"] [:reload "Reload definitions in this session"] [:load "Open file…"] [:save-block "Save file…"]
    [:download-file "Download file"] [:download-workspace "Download workspace"]
    [:split-row "Split side by side"] [:split-column "Split stacked"]
    [:spawn "Spawn new block"] [:spawn-slot "Spawn slot"] [:close "Close block"]
@@ -310,6 +310,8 @@
                                                 (= (:source p) (:executedSource p))
                                                 (not (extensions-edited? p))
                                                 (str/blank? (:extensionDraft p)))
+                               :reload (and (contains? generations id) (some? (:executedSource p))
+                                            (not (:development p)))
                                :extend (and (contains? generations id)
                                             (not (extensions-edited? p))
                                             (not (str/blank? (:extensionDraft p))))

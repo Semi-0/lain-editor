@@ -86,3 +86,45 @@
                            (set! (.-fetch js/globalThis) fetch)
                            (s/transact! (fn [] (doseq [[cell value] (map vector cells before)] (reset! cell value))))
                            (done)))))))
+
+(deftest palette-reload-keeps-owner-and-preserves-a-rejected-draft
+  (async done
+    (let [fetch (.-fetch js/globalThis)
+          cells [s/workspace s/selected-id s/busy? s/pending-id s/generations s/session-ids s/run-ids
+                 s/reconnect s/applied-extensions s/errors s/results s/expansions s/message s/ui]
+          before (mapv deref cells)
+          doc (model/initial-workspace) id (:id (first (:panes doc)))
+          calls (atom []) generation (atom "g1") bad? (atom true)
+          owner (fn [] {:generation @generation :sessionId "same-session" :runId "same-run" :appliedExtensions []})
+          reload! #(effects/perform! {:action :reload :target id :enabled true})]
+      (s/transact! (fn []
+                     (reset! s/workspace (model/update-pane doc id assoc :source "edit" :executedSource "initial" :extensionDraft "pending"))
+                     (reset! s/busy? false) (reset! s/session-ids {id "same-session"})
+                     (reset! s/generations {id "g1"}) (reset! s/run-ids {id "same-run"})))
+      (set! (.-fetch js/globalThis)
+            (fn [_ options]
+              (let [cmd (js->clj (js/JSON.parse (.-body options)) :keywordize-keys true)
+                    _ (swap! calls conj cmd)
+                    result (case (:op cmd)
+                             "session-status" {:ok true :result (owner)}
+                             "reload" (if @bad? {:ok false :error "Unsupported wiring edit"}
+                                          (do (reset! generation "g2") {:ok true :result (owner)})))]
+                (js/Promise.resolve #js {:json #(js/Promise.resolve (clj->js result))}))))
+      (-> (reload!)
+          (.then (fn [_]
+                   (is (= "Unsupported wiring edit" (get @s/errors id)))
+                   (is (= ["edit" "initial" "pending"]
+                          ((juxt :source :executedSource :extensionDraft) (model/pane @s/workspace id))))
+                   (reset! bad? false)
+                   (reload!)))
+          (.then (fn [_]
+                   (is (= ["session-status" "reload" "session-status" "reload"] (mapv :op @calls)))
+                   (is (= ["edit" "edit" "pending"]
+                          ((juxt :source :executedSource :extensionDraft) (model/pane @s/workspace id))))
+                   (is (= "g2" (get @s/generations id)))
+                   (is (= "same-session" (get @s/session-ids id)))
+                   (is (= "same-run" (get @s/run-ids id)))))
+          (.catch #(is false (.-message %)))
+          (.finally (fn [] (set! (.-fetch js/globalThis) fetch)
+                      (s/transact! (fn [] (doseq [[cell v] (map vector cells before)] (reset! cell v))))
+                      (done)))))))
