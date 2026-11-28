@@ -50,7 +50,7 @@ Application files and examples mentioned below live in the configured backend pr
 - **Spawn slot** scans the selected block's current application declarations and
   applies one ordinary extension defining its unresolved callable bindings. For
   `(consume-task agents queue)`, it generates
-  `(define consume-task (network [input-1 input-2] (define out) out))`.
+  `(define consume-task (network [input-1 input-2] (let-cell [out] out)))`.
   Empty data inputs are left alone; generated outputs remain unknown. Repeated
   calls share one stub, and conflicting input counts reject the whole operation.
   Computed callables that already have a producer and nested lexical parameters
@@ -181,15 +181,12 @@ Frontend checks run in this repository with `clojure -M:test`, `clojure -M:edito
 
 ## Program-driven display
 
-`def-cells` declares one or more empty named cells, equivalent to consecutive
-`define` forms. `relationship:dataflow` returns its result cell and can be nested,
-passed as an operator, or called with an explicit output for compatibility.
+Both `relationship:roots` and `relationship:dataflow` return a cell. Pass the
+first result directly into the second to display the graph as the input changes.
 
 ```clojure
-(def-cells input raw)
-(-> 5 input)
-(relationship:roots input raw)
-(display (relationship:dataflow raw))
+(define input 5)
+(display (relationship:dataflow (relationship:roots input)))
 ```
 
 `display` is an editor extension operator with one input. It forwards live content
@@ -227,7 +224,7 @@ Development transitions remain pure and declare effects. Controllers own HTTP an
 Open `examples/lain/semantic_tracing/workspace.json` for eight runnable panels:
 unary, binary, three-input application, true/false branching, accumulator recursion,
 two-output application, and a returned closure with a captured binding.
-Each example declares output cells with `def-cells` and directly calls
+Each example defines its result from an expression and calls
 `(display (relationship:roots-semantic seed))`. Declarations and expressions
 are written on separate lines.
 `relationship:roots` also returns a cell as an ordinary callable expression;

@@ -180,8 +180,8 @@
     (is (every? (complement :enabled) (model/commands (document) "a" {} true)))))
 
 (deftest applied-extension-edits-preserve-executed-code-until-replayed
-  (let [pane (assoc (model/new-pane "a") :source "(def-cells input)"
-                    :executedSource "(def-cells input)"
+  (let [pane (assoc (model/new-pane "a") :source "(define input (let-cell [port] port))"
+                    :executedSource "(define input (let-cell [port] port))"
                     :extensions ["(-> 7 input)" "(define doubled (* input 2))"])
         edited (model/edit-extension pane 0 "(-> 9 input)")
         doc (assoc-in (document) [:panes 0] edited)
